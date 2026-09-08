@@ -29,7 +29,7 @@ class SparseMeshChecker(BaseUsdOptimizeChecker):
     @classmethod
     def _optimize_stage(cls, usdStage: Usd.Stage, _: Usd.Prim, operation_configs: list) -> None:
         """
-        Run scene optimizer using the results of the sparse mesh analysis
+        Run Usd Optimize using the results of the sparse mesh analysis
         """
         analysis.optimize(usdStage, operation_configs)
 

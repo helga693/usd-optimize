@@ -69,7 +69,7 @@ class TestCoreAnalysis(unittest.TestCase):
         self.assertTrue(does_not_exist_result[1])
 
     def test_optimize(self):
-        # build a list of operations to run scene optimizer on
+        # build a list of operations to run Usd Optimize on
         operations = [
             analysis.OperationConfig("sparseMeshes"),
             analysis.OperationConfig("doesNotExist"),

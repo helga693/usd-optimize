@@ -59,6 +59,15 @@ _RULE_CATEGORIES = (
     (ZeroExtentChecker, "Usd:Performance"),
 )
 
+# usd-validation-nvidia surfaces rules by class __name__ (--help, CSV "rule" column,
+# family classification), so prefix ours with "UsdOptimize" to keep them attributable
+# and clear of identically named upstream rules (e.g. IndexedPrimvarChecker). Rewrite
+# __name__ only -- __qualname__ stays intact so classes remain pickle-resolvable; the
+# framework never reads it. Idempotent across reloads.
+for _rule, _ in _RULE_CATEGORIES:
+    if not _rule.__name__.startswith("UsdOptimize"):
+        _rule.__name__ = "UsdOptimize" + _rule.__name__
+
 
 def register_all():
     """Register Usd Optimize rules with Asset Validator."""

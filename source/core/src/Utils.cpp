@@ -26,6 +26,7 @@
 
 // C++
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 
 
@@ -1093,8 +1094,12 @@ char* getCStr(const std::string& name)
     size_t len = name.length() + 1;
 
     auto result = (char*)malloc(sizeof(char) * len);
+    if (result == nullptr)
+    {
+        return nullptr;
+    }
 
-    strncpy(result, name.c_str(), len - 1);
+    memcpy(result, name.c_str(), len - 1);
     result[len - 1] = '\0';
 
     return result;

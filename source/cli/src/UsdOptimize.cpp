@@ -248,15 +248,31 @@ Optional Args:
 
 int main(int argc, char** argv)
 {
-    // Init scene optimizer.
+    // Init Usd Optimize.
     auto& core = UsdOptimizeCore::getInstance();
 
-    // If no args, print basic help.
+    // Every return from main routes through this so the core's shutdown-callback queue is
+    // always drained before static destruction begins. Nothing registers a callback before
+    // an operation actually executes today, so the early-exit paths below drain an empty
+    // queue -- but keeping the invariant structural means a future registration site cannot
+    // silently reintroduce the teardown-ordering hazard.
+    //
+    // Note this does not cover the exit() calls in parseArgs(): those terminate the process
+    // without unwinding back to main. They all run before any operation executes, so the
+    // queue is necessarily empty there; moving them to error returns would be needed if that
+    // ever stops being true.
+    auto finalizeAndReturn = [&core](int code)
+    {
+        core.runShutdownCallbacks();
+        return code;
+    };
+
+    // If no args, print basic help. Unlike an explicit -h/--help, this is a usage error.
     if (argc == 1)
     {
         core.loadPlugins();
         printHelp();
-        exit(1);
+        return finalizeAndReturn(1);
     }
 
     for (int i = 1; i < argc; ++i)
@@ -276,15 +292,24 @@ int main(int argc, char** argv)
                 if (operation != nullptr)
                 {
                     printHelpOperation(operation.get());
-                    return 1;
+                    return finalizeAndReturn(0);
+                }
+
+                // Not an operation, so fall back to the general help below - but say so,
+                // rather than silently ignoring what is most likely a mistyped name. A
+                // flag-shaped value is another option, not a bad name, so stay quiet.
+                if (value.rfind('-', 0) != 0)
+                {
+                    std::cerr << "Unknown operation: " << value << " - showing general help." << std::endl;
                 }
             }
 
+            // Help was explicitly requested and printed, so this is a success, not an error.
             printHelp();
-            return 1;
+            return finalizeAndReturn(0);
         }
     }
 
     // Call main entrypoint in core library
-    return usdOptimizeInterface(argc, argv);
+    return finalizeAndReturn(usdOptimizeInterface(argc, argv));
 }

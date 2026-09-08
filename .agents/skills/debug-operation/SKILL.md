@@ -1,10 +1,10 @@
 ---
 name: debug-operation
 description: Triage a failing Usd Optimize operation. Use when an op errors, silently no-ops, or returns unexpected output.
-version: "1.0.0"
 allowed-tools: Shell, Read, Grep, Glob
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [debug, troubleshooting, operations]
 ---
 
@@ -41,13 +41,17 @@ Run the operation through the `usdOptimize` CLI with full logging, and omit
 ```bash
 # POSIX — verbose, capture stats, no output written
 BIN=_build/linux-x86_64/release/bin/usdOptimize
-"$BIN" -i "$ASSET" -o <key> -a <arg>=<val> -v -s -r > "$TMPDIR/debug-run.log" 2>&1
+"$BIN" -i "$ASSET" -o <key> -a <arg>=<val> -v -s > "$TMPDIR/debug-run.log" 2>&1
 ```
 
-`-v` is verbose, `-s` captures before/after stats, `-r` emits a report.
-Omitting `-w` means nothing is written. The log captures the C++
-`[INFO]`/`[WARN]`/`[ERROR]` lines. For a multi-op chain, use `-c <config.json>`
-instead of `-o`/`-a`.
+`-v` is verbose and `-s` captures before/after stats. Omitting `-w` means
+nothing is written. The log captures the C++ `[INFO]`/`[WARN]`/`[ERROR]`
+lines. For a multi-op chain, use `-c <config.json>` instead of `-o`/`-a`.
+
+**Do not add `-r` here.** `-r` diverts the operation's warnings into the
+report file instead of stdout, so `[WARNING]` lines the checks below grep
+for never reach your log. If you also want the report, run a second pass
+with `-r` added rather than folding it into this one.
 
 If the user already has a log (e.g. from a prior `run-operations` run),
 skip this step and read their log directly.
@@ -59,8 +63,11 @@ Check them in order before going deeper.
 
 ### 2a. Argument key mismatch
 
-Operations silently ignore unknown argument keys. Verify every key in the
-user's config matches the operation's `addArgument()` declarations:
+An unknown key in a `-c` config logs `[WARNING] Unknown argument '<key>' for
+operation '<op>' -- ignoring it` and the operation runs with the default, so
+grep the log for `Unknown argument` first. (Via `-a` it's a hard error instead:
+`Error: invalid argument specified`, exit 1.) Verify every key in the user's
+config matches the operation's `addArgument()` declarations:
 
 ```bash
 # Check the C++ source for the canonical argument keys

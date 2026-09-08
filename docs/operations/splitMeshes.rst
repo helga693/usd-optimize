@@ -26,6 +26,36 @@ Split and re-cluster spatially by vertex count:
 
     [{"operation": "splitMeshes", "spatialMode": 2, "spatialVertexCount": 50000}]
 
+Merge boundaries
+----------------
+
+``mergePoint`` selects the boundary that meshes are grouped under. Only meshes sharing a boundary are
+merged with each other, and the result is written under that boundary. Callers driving the operation
+from JSON, the CLI or the API pass the integer value.
+
+.. table::
+   :widths: 10 25 65
+
+   ===== ================== ================================================================================
+   Value UI label           Merge boundary
+   ===== ================== ================================================================================
+   0     Stage              The pseudo-root, so the whole stage is a single boundary (default)
+   1     Parent Xform       The first parent typed ``Xform``
+   2     Kind: Assembly     The first parent of kind ``assembly``
+   3     Kind: Group        The first parent of kind ``group``
+   4     Kind: Component    The first parent of kind ``component``, falling back to ``group``
+   5     Kind: Model        The first parent of kind ``model``
+   6     Kind: Subcomponent The first parent of kind ``subcomponent``, then ``component``, then ``group``
+   7     Root Prim          Each root prim, that is each direct child of the pseudo-root
+   8     Parent Prim        The first parent, whatever its type
+   9     Original Prim      Each mesh itself, with results written beside the original rather than under it
+   ===== ================== ================================================================================
+
+Kinds are matched through the kind registry, so a mode also matches any kind derived from the one it
+names. The values above are elective boundaries layered on top of the structural boundaries that
+always apply: the pseudo-root, prims that are not ``def``, prims composed into an instanceable prim,
+prims that reset the xform stack, and prims with a time sampled transform or visibility.
+
 
 Arguments
 ---------

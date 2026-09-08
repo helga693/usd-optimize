@@ -30,9 +30,12 @@ project_with_location("usd_optimize.core")
 
     -- A couple of extra libs that are found in different places on windows.
     -- Glob tbb*.dll: USD 25.11 ships oneTBB (tbb12.dll), USD 25.05 classic TBB (tbb.dll).
+    -- Glob MaterialX*.dll: usd_usdMtlx.dll comes from usd/lib, its MaterialX runtime from
+    -- usd/bin; without both the plugin cannot load from extraLibs.
     if os.target() == "windows" then
         repo_build.prebuild_copy{
             {target_deps.."/usd/%{config}/bin/tbb*.dll", extra_dir},
+            {target_deps.."/usd/%{config}/bin/MaterialX*.dll", extra_dir},
             {target_deps.."/python/python"..string.gsub(PYTHON_VERSION, "%.", "")..".dll", extra_dir},
         }
     end

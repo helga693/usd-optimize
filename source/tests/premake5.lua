@@ -152,14 +152,12 @@ set PYTHONPATH=%%TEST_PY_PATH%%;%%PYTHONPATH%%
         -- the actual test runner
         local win_test_dir = "%~dp0/tests/"..name
         local win_python_bin = '"%~dp0/../../target-deps/python/python.exe"'
-        -- The asset_validator integration tests need usd-validation-nvidia
-        -- importable from the bundled Python. Install on first run only.
+        -- The asset_validator integration tests need usd-validation-nvidia in the
+        -- bundled Python. pip enforces the floor; a presence check would skip an
+        -- older install.
         local win_ensure_av = string.format([[
-%s -c "import usd_validation_nvidia" >NUL 2>&1
-if errorlevel 1 (
-    %s -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.19.3"
-)
-]], win_python_bin, win_python_bin)
+%s -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.21.0"
+]], win_python_bin)
         -- Forward extra args (%*) to run_discover.py so callers can run
         -- individual tests, e.g.:
         --     test.python.bat test_operation_pivot
@@ -216,12 +214,12 @@ export PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH}
         local python_bin = string.format(
             '"$SCRIPT_DIR/../../target-deps/python/bin/python%s"',
             PYTHON_VERSION)
-        -- The asset_validator integration tests need usd-validation-nvidia
-        -- importable from the bundled Python. Install on first run only.
+        -- The asset_validator integration tests need usd-validation-nvidia in the
+        -- bundled Python. pip enforces the floor; a presence check would skip an
+        -- older install.
         local ensure_av = string.format([[
-%s -c "import usd_validation_nvidia" >/dev/null 2>&1 || \
-    %s -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.19.3"
-]], python_bin, python_bin)
+%s -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.21.0"
+]], python_bin)
         -- Forward extra args ("$@") to run_discover.py so callers can run
         -- individual tests, e.g.:
         --     ./test.python.sh test_operation_pivot

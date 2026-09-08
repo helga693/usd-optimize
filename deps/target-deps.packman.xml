@@ -38,7 +38,7 @@
   <dependency name="shrinkwrap_openvdb" linkPath="../_build/target-deps/shrinkwrap_openvdb/${config}" />
 
   <dependency name="mesh_tools" linkPath="../_build/target-deps/mesh_tools/${config}">
-    <package name="mesh_tools_lib" version="1.0.0.1ed0a585.${platform_target_abi}.${config}" platforms="windows-x86_64 manylinux_2_35_x86_64 manylinux_2_35_aarch64" />
+    <package name="mesh_tools_lib" version="1.0.2.518900cd.${platform_target_abi}.${config}" platforms="windows-x86_64 manylinux_2_35_x86_64 manylinux_2_35_aarch64" />
   </dependency>
   <dependency name="cuda" linkPath="../_build/target-deps/cuda">
     <package name="cuda" version="12.4.1-5-${platform_target_abi}-release" platforms="linux-x86_64 manylinux_2_35_x86_64 linux-aarch64 manylinux_2_35_aarch64" />

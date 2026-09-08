@@ -1,0 +1,64 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def Xform "Outside"
+    {
+        double3 xformOp:translate = (100, 200, 300)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def SkelRoot "Skel"
+    {
+        double3 xformOp:translate = (10, 20, 30)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Skeleton "Skeleton"
+        {
+            def OmniJoint "Root"
+            {
+                double3 xformOp:translate = (1, 2, 3)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def OmniJoint "Child"
+                {
+                    double3 xformOp:rotateXYZ = (10, 20, 30)
+                    double3 xformOp:translate = (4, 5, 6)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+
+                    def OmniJoint "GrandChild"
+                    {
+                        double3 xformOp:translate = (7, 8, 9)
+                        uniform token[] xformOpOrder = ["xformOp:translate"]
+                    }
+                }
+            }
+        }
+
+        def Mesh "SkinnedMesh"
+        {
+            float3[] extent = [(-1, -2, -3), (1, 2, 3)]
+            point3f[] points = [(-1, -2, -3), (1, 2, 3)]
+        }
+    }
+
+    def SkelRoot "SkelResetsXformStack"
+    {
+        double3 xformOp:translate = (10, 20, 30)
+        uniform token[] xformOpOrder = ["!resetXformStack!", "xformOp:translate"]
+
+        def Skeleton "Skeleton"
+        {
+            def OmniJoint "Root"
+            {
+                double3 xformOp:translate = (1, 2, 3)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+            }
+        }
+    }
+}

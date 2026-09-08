@@ -220,11 +220,16 @@ package_per_config = true
 remove_pycache = true
 files = [
     ["README.md", ""],
+    ["LICENSE", "PACKAGE-LICENSES/LICENSE"],
+    ["THIRD_PARTY_NOTICES.md", "PACKAGE-LICENSES/THIRD_PARTY_NOTICES.md"],
     ["SECURITY.md", ""],
     ["CHANGELOG.md", ""],
     ["AGENTS.md", ""],
     [".agents/**", ".agents"],
     ["docs/**", "docs"],
+    # Docs and skills tell readers to run `usdOptimize -c config_presets/<name>.json`,
+    # so the presets must travel with the CLI.
+    ["config_presets/**", "config_presets"],
     ["_build/$platform/release/include/**", "include"],
     ["_build/$platform/$config/python", "python"],
     ["_build/$platform/$config/lib", "lib"],
@@ -292,6 +297,10 @@ sphinx_exclude_patterns = [
     ".agents",
     ".claude",
     ".codex",
+    # GitHub Pages preview sources (.github/pages/*.rst) are for the standalone
+    # GitHub-hosted Sphinx build only; the production `repo docs` build must not
+    # pick them up (their toctree/paths assume a different, runtime-assembled tree).
+    ".github",
     "deps",
     "resources",
     "tools",

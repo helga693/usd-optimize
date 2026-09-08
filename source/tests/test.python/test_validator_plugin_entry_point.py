@@ -81,6 +81,28 @@ class Test_ValidatorPluginEntryPoint(TestCase):
         for rule, _ in _RULE_CATEGORIES:
             self.assertIsNone(registry.get_category(rule), msg=f"{rule.__name__} still registered after shutdown")
 
+    def test_all_rules_have_usdoptimize_name_prefix(self):
+        """Every registered rule is surfaced under a ``UsdOptimize``-prefixed name.
+
+        usd-validation-nvidia reports rules by class ``__name__`` (the CLI
+        ``--help`` rule list, the CSV ``rule`` column, family classification),
+        so the prefix keeps Usd Optimize rules attributable and clear of
+        identically named upstream rules (e.g. ``IndexedPrimvarChecker``).
+
+        ``__qualname__`` is deliberately left un-prefixed so each class stays
+        resolvable by pickle (``__module__`` + ``__qualname__``) against its real
+        module attribute; the framework reads ``__name__`` and never ``__qualname__``.
+        """
+        for rule, _ in _RULE_CATEGORIES:
+            self.assertTrue(
+                rule.__name__.startswith("UsdOptimize"),
+                msg=f"{rule.__name__} is not UsdOptimize-prefixed",
+            )
+            self.assertFalse(
+                rule.__qualname__.startswith("UsdOptimize"),
+                msg=f"{rule.__name__}: __qualname__ must stay un-prefixed to remain pickle-resolvable",
+            )
+
     def test_entry_point_discoverable_when_installed(self):
         """When the wheel is installed, the entry point is discoverable and loads the plugin.
 

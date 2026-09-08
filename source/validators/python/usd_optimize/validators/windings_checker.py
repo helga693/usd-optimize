@@ -20,6 +20,23 @@ class WindingsChecker(BaseUsdOptimizeChecker):
 
     OPERATION_NAME: str = "meshCleanup"
 
+    # Analysis needs no fix enabled: the winding/normal comparison runs unconditionally in analysis
+    # mode (MeshCleanup.cpp, windingsDisagreeWithNormals), outside the gated checkClean defect set.
+    # Leaving this unset falls through to the operation's C++ ctor defaults, which enable six defect
+    # categories at once -- and CoincidentNeighborVertices together with DegenerateEdges corrupts the
+    # heap inside omo::checkClean.
+    OPERATION_ARGS = {
+        "mergeVertices": False,
+        "tolerance": 0.0,
+        "contractDegenerateEdges": False,
+        "removeDegenerateFaces": False,
+        "makeManifold": False,
+        "removeIsolatedVertices": False,
+        "mergeBoundaries": False,
+        "mergeNeighbors": False,
+        "removeDuplicateFaces": False,
+    }
+
     @classmethod
     def _mesh_coorient(cls, usdStage: Usd.Stage, prim: Usd.Prim) -> None:
         """

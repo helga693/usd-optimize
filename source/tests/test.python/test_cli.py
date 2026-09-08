@@ -103,7 +103,7 @@ class Test_Cli(unittest.TestCase):
         for flag in ("-h", "--help"):
             with self.subTest(flag=flag):
                 result = self._run(flag)
-                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.returncode, 0)
                 self.assertIn("Usage: usdOptimize", result.stdout)
                 self.assertIn("Required Args:", result.stdout)
                 self.assertIn("Available Operations:", result.stdout)
@@ -111,7 +111,7 @@ class Test_Cli(unittest.TestCase):
     def test_help_for_operation(self):
         """``-h <operation>`` prints operation-specific help."""
         result = self._run("-h", "printStats")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 0)
         # Display name and key both appear in the per-operation header.
         self.assertIn("(printStats) Help:", result.stdout)
         self.assertIn("Args:", result.stdout)
@@ -121,18 +121,36 @@ class Test_Cli(unittest.TestCase):
     def test_help_for_unknown_operation_falls_back_to_general_help(self):
         """``-h <not-an-op>`` falls through to the general help."""
         result = self._run("-h", "definitelyNotAnOperation")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 0)
         self.assertIn("Available Operations:", result.stdout)
+        self.assertIn("Unknown operation", result.stderr)
+
+    def test_help_followed_by_flag_does_not_warn(self):
+        """A flag after ``-h`` is another option, not a mistyped operation name."""
+        for flag in ("-v", "-an"):
+            with self.subTest(flag=flag):
+                result = self._run("-h", flag)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("Available Operations:", result.stdout)
+                self.assertNotIn("Unknown operation", result.stderr)
 
     # -- argument parsing errors -----------------------------------------
 
     def test_unknown_argument(self):
-        """An unrecognized flag (not in final position) is an error."""
-        # The flag must not be the final argument, otherwise the CLI treats it
-        # as the positional input stage.
+        """An unrecognized flag before other arguments is an error."""
+        # The parser treats the final argument separately, so this case and
+        # test_unknown_argument_in_final_position cover different branches.
         result = self._run("--bogus", "-i", self._stage_path())
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown argument", result.stderr)
+
+    def test_unknown_argument_in_final_position(self):
+        """A flag-shaped final argument is rejected, not taken as the input stage."""
+        for flag in ("--bogus-flag", "--version"):
+            with self.subTest(flag=flag):
+                result = self._run(flag)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("unknown argument", result.stderr)
 
     def test_no_input_specified(self):
         """An operation with no input stage reports that no stage was given."""
@@ -151,15 +169,16 @@ class Test_Cli(unittest.TestCase):
     def test_python_operations_not_available_in_cli(self):
         """Python-plugin operations are intentionally unavailable from the native CLI.
 
-        ``pythonScript``, ``deleteHiddenPrims`` and ``removeUntypedPrims`` are
-        implemented as Python plugins (``source/operations/<name>/__init__.py``).
+        ``pythonScript``, ``deleteHiddenPrims``, ``removeUntypedPrims`` and
+        ``moveMaterials`` are implemented as Python plugins
+        (``source/operations/<name>/__init__.py``).
         The core only loads those plugin directories when a Python interpreter is
         initialized (the ``Py_IsInitialized()`` gate in ``Core.cpp``).  The
         standalone CLI binary never initializes Python, so these operations are
         not registered and must be rejected.  They remain available via the
         ``usd-optimize`` Python wheel / bindings.
         """
-        for op in ("pythonScript", "deleteHiddenPrims", "removeUntypedPrims"):
+        for op in ("pythonScript", "deleteHiddenPrims", "removeUntypedPrims", "moveMaterials"):
             with self.subTest(operation=op):
                 result = self._run("-i", self._stage_path(), "-o", op)
                 self.assertEqual(result.returncode, 1)

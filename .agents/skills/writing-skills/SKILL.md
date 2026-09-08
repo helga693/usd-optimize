@@ -1,10 +1,10 @@
 ---
 name: writing-skills
-description: Author or revise a Usd Optimize skill (.agents/skills/<name>/SKILL.md). Use when adding, restructuring, or reviewing a skill so it matches house conventions and is registered in the index.
-version: "1.0.0"
+description: Author or revise a Usd Optimize skill (.agents/skills/{name}/SKILL.md). Use when adding, restructuring, or reviewing a skill so it matches house conventions and is registered in the index.
 allowed-tools: Shell, Read, Write, Edit, Glob, Grep
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [meta, authoring, documentation, skills]
 ---
 
@@ -29,6 +29,8 @@ every other skill in this repo follows and is discoverable by agents.
 - **Frontmatter reference** — every field, with examples.
 - **House conventions** — the rules that keep skills consistent.
 - **Anti-patterns** — what reviewers will flag.
+- **Troubleshooting** — why a skill fails to fire, and what to do.
+- **Purpose / Prerequisites / Limitations** — scope of this skill.
 
 Companion docs: [`.agents/skills/README.md`](../README.md) (the cross-skill
 index you must update), and the existing skills themselves — `new-operation`
@@ -74,7 +76,8 @@ Avoid making sweeping changes to the skills. If you find yourself wanting to
 make a lot of changes to multiple skills, consider whether the changes are
 necessary and if they can be made in a more focused way.
 
-Don't use em dashes in the skill text. Use a colon or parentheses instead.
+Punctuation is not policed. Em dashes are fine; so are colons and
+parentheses. Prefer whichever keeps the sentence readable.
 
 ---
 
@@ -118,11 +121,11 @@ Copy this shape (see the full **Frontmatter reference** below for each field):
 ```markdown
 ---
 name: <name>
-description: <what it does>. Use when <trigger>.
-version: "1.0.0"
+description: {what it does}. Use when {trigger}.
 allowed-tools: Shell, Read, Write, Glob, Grep
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [<tag>, <tag>]
 ---
 
@@ -173,9 +176,11 @@ A skill that isn't in [`.agents/skills/README.md`](../README.md) is invisible
 to the per-session index. Add it in **three** places (skip any that don't
 apply):
 
-1. **The "When to use which skill" table** — one row:
-   `| [`<name>`](<name>/SKILL.md) | Use when … |`
-   Place it near related skills, not necessarily at the end.
+1. **The "When to use which skill" table** — one row: first column a markdown
+   link labelled with the skill name in backticks and pointing at
+   `<name>/SKILL.md` (relative to `README.md`, so no leading path), second
+   column a `Use when …` gloss. Place it near related skills, not necessarily
+   at the end.
 2. **The end-to-end loop diagram** — only if the skill is part of the
    inspect → validate → interpret → operate → compare flow.
 3. **"Cross-references at a glance"** — a bullet per load-bearing pointer to or
@@ -203,7 +208,7 @@ ls .agents/skills/<name>/SKILL.md
 Manual checklist:
 
 - [ ] `name:` equals the directory name.
-- [ ] `description:` says what it does **and** when to use it.
+- [ ] `description:` says what it does **and** when to use it, with no angle brackets.
 - [ ] SPDX header comments present (copyright + license).
 - [ ] "What this skill covers" block lists every section.
 - [ ] All commands are in fenced code blocks and are runnable as written.
@@ -219,10 +224,10 @@ Manual checklist:
 | Field | Required | Example | Notes |
 |---|---|---|---|
 | `name` | yes | `compare-stages` | `kebab-case`; **must** equal the directory name. Drives `/<name>`. |
-| `description` | yes | `Structured diff between two USD stages. Use when comparing before/after optimization.` | What + when, one sentence. This is how agents pick the skill. |
-| `version` | recommended | `"1.0.0"` | Quoted string. Start at `1.0.0`; bump on meaningful change. |
+| `description` | yes | `Structured diff between two USD stages. Use when comparing before/after optimization.` | What + when, one sentence. This is how agents pick the skill. No angle brackets: a `<placeholder>` parses as an XML tag and fails validation. |
 | `allowed-tools` | recommended | `Shell, Read, Write, Glob, Grep` | Comma-separated Claude Code tool names the skill needs. |
 | `metadata.author` | recommended | `NVIDIA Corporation` | Default author unless the user specifies otherwise. |
+| `metadata.version` | recommended | `"1.0.0"` | Quoted string, **under `metadata`**: a root-level `version` is not in the schema and is ignored. Start at `1.0.0`; bump on meaningful change. |
 | `metadata.tags` | optional | `[meta, authoring]` | Short topical tags for discovery. |
 
 The README index uses a slightly different frontmatter (`name` + `description`
@@ -260,3 +265,37 @@ Reviewers will push back on these:
   already lives in a reference doc. Link instead; copies drift.
 - **Repeating the tool-translation table** — it lives once in the root
   `AGENTS.md`; just use canonical tool names.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The skill never fires for an obviously matching request | `description` is vague, or describes the topic rather than the trigger | Rewrite it as "does X; use when Y" (Step 2); the dispatcher reads only the frontmatter. |
+| Two skills both fire for the same request | Overlapping `description` scope | Narrow the weaker one and cross-link the pair, as `run-operations` and `config-presets` do. |
+| An agent follows the skill but misses a later section | The "What this skill covers" block omits it | Add the section to the block; agents scan it to decide how far to read. |
+| The skill is correct but nobody finds it | Not registered in `README.md` | Complete Step 4. |
+| A documented command fails for a reader but works for you | The command is source-tree-only and the reader is in a drop or the public mirror | State which surface it needs; `tools/ci`, `source/` and `repo.bat` are not present everywhere. |
+
+## Purpose
+
+Author a new skill under `.agents/skills/<name>/`, or restructure an existing
+one, so it is discoverable by the dispatcher, readable end to end by an agent,
+and consistent with the skills already in this repo.
+
+## Prerequisites
+
+- A task worth a skill rather than a doc page — see "When to write a skill".
+- Write access to `.agents/skills/` and `.agents/skills/README.md`.
+- A nearby skill to model: `run-operations` for a workflow, `config-presets`
+  for a chooser, `new-operation` for a scaffold.
+
+## Limitations
+
+- Covers authoring only. It does not run, evaluate, or score skills.
+- It cannot verify that what a skill claims about the product is true. Every
+  statement about shipped behaviour has to be checked against the build; this
+  is the most common source of defects in shipped skill text.
+- Frontmatter keys beyond the reference above are passed through untouched;
+  this skill does not validate them.

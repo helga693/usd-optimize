@@ -15,10 +15,7 @@
 #    include <setupapi.h>
 #    pragma comment(lib, "setupapi.lib")
 #else
-#    include <dirent.h>
 #    include <dlfcn.h>
-#    include <fstream>
-#    include <string>
 #endif
 // clang-format on
 
@@ -26,12 +23,9 @@
 namespace usd_optimize
 {
 
-/// Check if any NVIDIA GPU is present by querying hardware device information.
-/// This avoids calling CUDA functions which may crash if no GPU is present.
-static bool hasNvidiaGpu()
-{
 #if defined(_WIN32)
-    // GUID for display adapters
+static bool hasNvidiaDisplayAdapter()
+{
     static const GUID GUID_DEVCLASS_DISPLAY = { 0x4d36e968,
                                                 0xe325,
                                                 0x11ce,
@@ -56,146 +50,85 @@ static bool hasNvidiaGpu()
                                               NULL,
                                               (PBYTE)buffer,
                                               sizeof(buffer),
-                                              NULL))
-        {
-            // Check if this is an NVIDIA device (VEN_10DE is NVIDIA's vendor ID)
-            if (strstr(buffer, "VEN_10DE") != NULL || strstr(buffer, "ven_10de") != NULL)
-            {
-                foundNvidia = true;
-                break;
-            }
-        }
-    }
-
-    SetupDiDestroyDeviceInfoList(deviceInfoSet);
-    return foundNvidia;
-
-#elif defined(__linux__)
-    // Scan sysfs PCI devices for an NVIDIA GPU.
-    // Each device exposes a "vendor" file (e.g. "0x10de") and a "class" file
-    // (e.g. "0x030000" for VGA, "0x030200" for 3D controller).
-    // We check for NVIDIA vendor ID 0x10de with display class 0x03xxxx.
-    const char* sysPath = "/sys/bus/pci/devices";
-    DIR* dir = opendir(sysPath);
-    if (!dir)
-    {
-        return false;
-    }
-
-    bool foundNvidia = false;
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != nullptr)
-    {
-        if (entry->d_name[0] == '.')
-        {
-            continue;
-        }
-
-        std::string devicePath = std::string(sysPath) + "/" + entry->d_name;
-
-        // Read vendor ID
-        std::ifstream vendorFile(devicePath + "/vendor");
-        if (!vendorFile.is_open())
-        {
-            continue;
-        }
-        std::string vendor;
-        std::getline(vendorFile, vendor);
-        vendorFile.close();
-
-        // 0x10de is NVIDIA's PCI vendor ID
-        if (vendor != "0x10de")
-        {
-            continue;
-        }
-
-        // Read PCI class to ensure this is a display device (class 0x03xxxx)
-        // and not e.g. an audio controller on the GPU
-        std::ifstream classFile(devicePath + "/class");
-        if (!classFile.is_open())
-        {
-            continue;
-        }
-        std::string pciClass;
-        std::getline(classFile, pciClass);
-        classFile.close();
-
-        // PCI class is a 24-bit value like "0x030000" (VGA) or "0x030200" (3D controller).
-        // The top byte (0x03) is the base class for display controllers.
-        if (pciClass.size() >= 4 && pciClass.substr(0, 4) == "0x03")
+                                              NULL) &&
+            (strstr(buffer, "VEN_10DE") != NULL || strstr(buffer, "ven_10de") != NULL))
         {
             foundNvidia = true;
             break;
         }
     }
 
-    closedir(dir);
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
     return foundNvidia;
-
-#else
-    return false;
-#endif
 }
+#endif
 
 bool isCudaAvailable()
 {
     static std::once_flag initFlag;
     static bool available = false;
 
-    std::call_once(initFlag,
-                   []()
-                   {
-                       // Driver API function pointer types
-                       typedef int (*PFN_cuInit)(unsigned int);
-                       typedef int (*PFN_cuDeviceGetCount)(int*);
+    std::call_once(
+        initFlag,
+        []()
+        {
+            // Driver API function pointer types
+            typedef int (*PFN_cuInit)(unsigned int);
+            typedef int (*PFN_cuDeviceGetCount)(int*);
 
-                       PFN_cuInit pfn_cuInit = nullptr;
-                       PFN_cuDeviceGetCount pfn_cuDeviceGetCount = nullptr;
-
-                       // First check if any NVIDIA GPU is present using OS APIs.
-                       // This avoids calling cuInit which can crash if driver is
-                       // installed but no GPU is present.
-                       if (!hasNvidiaGpu())
-                       {
-                           USD_OPTIMIZE_LOG_WARN("No NVIDIA GPU found. GPU acceleration disabled.");
-                           return;
-                       }
+            PFN_cuInit pfn_cuInit = nullptr;
+            PFN_cuDeviceGetCount pfn_cuDeviceGetCount = nullptr;
 
 #if defined(_WIN32)
-                       HMODULE hCudaDriver = LoadLibraryA("nvcuda.dll");
-                       if (hCudaDriver == NULL)
-                       {
-                           USD_OPTIMIZE_LOG_WARN("Could not load nvcuda.dll. GPU acceleration disabled.");
-                           return;
-                       }
+            if (!hasNvidiaDisplayAdapter())
+            {
+                USD_OPTIMIZE_LOG_WARN("No NVIDIA GPU found. GPU acceleration disabled.");
+                return;
+            }
 
-                       pfn_cuInit = (PFN_cuInit)GetProcAddress(hCudaDriver, "cuInit");
-                       pfn_cuDeviceGetCount = (PFN_cuDeviceGetCount)GetProcAddress(hCudaDriver, "cuDeviceGetCount");
+            HMODULE hCudaDriver = LoadLibraryA("nvcuda.dll");
+            if (hCudaDriver == NULL)
+            {
+                USD_OPTIMIZE_LOG_WARN("Could not load nvcuda.dll. GPU acceleration disabled.");
+                return;
+            }
 
-                       if (!pfn_cuInit || !pfn_cuDeviceGetCount)
-                       {
-                           USD_OPTIMIZE_LOG_WARN("Could not get CUDA driver functions. GPU acceleration disabled.");
-                           FreeLibrary(hCudaDriver);
-                           return;
-                       }
+            pfn_cuInit = (PFN_cuInit)GetProcAddress(hCudaDriver, "cuInit");
+            pfn_cuDeviceGetCount = (PFN_cuDeviceGetCount)GetProcAddress(hCudaDriver, "cuDeviceGetCount");
 
-                       int err = pfn_cuInit(0);
-                       if (err != 0)
-                       {
-                           FreeLibrary(hCudaDriver);
-                           return;
-                       }
+            if (!pfn_cuInit || !pfn_cuDeviceGetCount)
+            {
+                USD_OPTIMIZE_LOG_WARN("Could not get CUDA driver functions. GPU acceleration disabled.");
+                FreeLibrary(hCudaDriver);
+                return;
+            }
 
-                       int deviceCount = 0;
-                       err = pfn_cuDeviceGetCount(&deviceCount);
-                       available = (err == 0 && deviceCount > 0);
-                       FreeLibrary(hCudaDriver);
+            int err = pfn_cuInit(0);
+            if (err != 0)
+            {
+                USD_OPTIMIZE_LOG_WARN("Could not initialize CUDA driver (error %d). GPU acceleration disabled.", err);
+                FreeLibrary(hCudaDriver);
+                return;
+            }
+
+            int deviceCount = 0;
+            err = pfn_cuDeviceGetCount(&deviceCount);
+            available = (err == 0 && deviceCount > 0);
+            if (err != 0)
+            {
+                USD_OPTIMIZE_LOG_WARN("Could not query CUDA device count (error %d). GPU acceleration disabled.", err);
+            }
+            else if (deviceCount <= 0)
+            {
+                USD_OPTIMIZE_LOG_WARN("No CUDA-capable GPU found. GPU acceleration disabled.");
+            }
+            FreeLibrary(hCudaDriver);
 
 #elif defined(__linux__)
             void* hCudaDriver = dlopen("libcuda.so", RTLD_NOW);
             if (hCudaDriver == NULL)
             {
-                // WSL and possibly other systems might require the .1 suffix
+                // WSL and possibly other systems might require the .1 suffix.
                 hCudaDriver = dlopen("libcuda.so.1", RTLD_NOW);
                 if (hCudaDriver == NULL)
                 {
@@ -217,6 +150,7 @@ bool isCudaAvailable()
             int err = pfn_cuInit(0);
             if (err != 0)
             {
+                USD_OPTIMIZE_LOG_WARN("Could not initialize CUDA driver (error %d). GPU acceleration disabled.", err);
                 dlclose(hCudaDriver);
                 return;
             }
@@ -224,9 +158,17 @@ bool isCudaAvailable()
             int deviceCount = 0;
             err = pfn_cuDeviceGetCount(&deviceCount);
             available = (err == 0 && deviceCount > 0);
+            if (err != 0)
+            {
+                USD_OPTIMIZE_LOG_WARN("Could not query CUDA device count (error %d). GPU acceleration disabled.", err);
+            }
+            else if (deviceCount <= 0)
+            {
+                USD_OPTIMIZE_LOG_WARN("No CUDA-capable GPU found. GPU acceleration disabled.");
+            }
             dlclose(hCudaDriver);
 #endif
-                   });
+        });
 
     return available;
 }

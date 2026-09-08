@@ -25,10 +25,8 @@ rem On Windows, DLL resolution uses PATH (no LD_LIBRARY_PATH).
 set "PATH=%BUILD_DIR%\bin;%BUILD_DIR%\lib;%BUILD_DIR%\extraLibs;%USD_DIR%\bin;%USD_DIR%\lib;%PATH%"
 set "PYTHONPATH=%BUILD_DIR%\python;%USD_DIR%\lib\python;%PYTHONPATH%"
 
-"%PYTHON%" -c "import usd_validation_nvidia" >NUL 2>&1
-if errorlevel 1 (
-    "%PYTHON%" -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.19.3"
-)
+rem pip enforces the floor; a presence check would skip an older install.
+"%PYTHON%" -m pip install --quiet --disable-pip-version-check "usd-validation-nvidia>=1.21.0"
 
 "%PYTHON%" "%SCRIPT_DIR%\validators.py" %*
 exit /b %errorlevel%

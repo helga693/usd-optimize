@@ -475,7 +475,7 @@ SplitMeshesOperation::SplitMeshesOperation()
 
 std::string SplitMeshesOperation::getDocumentation() const
 {
-    return R"DOC(This operation finds meshes that contain multiple disjoint pieces (parts that share no
+    return std::string(R"DOC(This operation finds meshes that contain multiple disjoint pieces (parts that share no
 vertices) and replaces them with separate mesh prims, one per connected piece. It is the inverse of
 :doc:`Merge Static Meshes<merge>` and is useful for debugging, isolating spatial outliers, and letting a
 renderer cull pieces independently.
@@ -494,7 +494,7 @@ Split and re-cluster spatially by vertex count:
 .. code-block:: json
 
     [{"operation": "splitMeshes", "spatialMode": 2, "spatialVertexCount": 50000}]
-)DOC";
+)DOC") + kMergePointDocumentation;
 }
 
 

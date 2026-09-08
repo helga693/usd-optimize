@@ -49,7 +49,7 @@ constexpr const char* kMappingFilename = "operation_mapping.json";
         printf("[DEBUG] " FMT "\n", __VA_ARGS__);                                                                      \
     }
 
-// Get the scene optimizer shared library dir from a known symbol within this library
+// Get the Usd Optimize shared library dir from a known symbol within this library
 static std::string _getLibraryDir()
 {
     return carb::extras::getLibraryDirectory(reinterpret_cast<void*>(_getLibraryDir));

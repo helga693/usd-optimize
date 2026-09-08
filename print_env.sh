@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export OMNI_REPO_ROOT="${OMNI_REPO_ROOT:-$SCRIPT_DIR}"
 
 print_env() {
+    local env_var_fmt='%-32s: %s\n'
     echo "***git***"
     if [[ "$(git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
         git -C "${SCRIPT_DIR}" log --decorate -n 1
@@ -92,13 +93,13 @@ print_env() {
     echo
 
     echo "***Environment variables***"
-    printf '%-32s: %s\n' PATH "${PATH}"
-    printf '%-32s: %s\n' LD_LIBRARY_PATH "${LD_LIBRARY_PATH}"
-    printf '%-32s: %s\n' OMNI_REPO_ROOT "${OMNI_REPO_ROOT}"
-    printf '%-32s: %s\n' PM_PACKAGES_ROOT "${PM_PACKAGES_ROOT}"
-    printf '%-32s: %s\n' CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}"
-    printf '%-32s: %s\n' CONDA_PREFIX "${CONDA_PREFIX}"
-    printf '%-32s: %s\n' PYTHONPATH "${PYTHONPATH}"
+    printf "${env_var_fmt}" PATH "${PATH}"
+    printf "${env_var_fmt}" LD_LIBRARY_PATH "${LD_LIBRARY_PATH}"
+    printf "${env_var_fmt}" OMNI_REPO_ROOT "${OMNI_REPO_ROOT}"
+    printf "${env_var_fmt}" PM_PACKAGES_ROOT "${PM_PACKAGES_ROOT}"
+    printf "${env_var_fmt}" CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}"
+    printf "${env_var_fmt}" CONDA_PREFIX "${CONDA_PREFIX}"
+    printf "${env_var_fmt}" PYTHONPATH "${PYTHONPATH}"
     echo
 
     if command -v conda >/dev/null 2>&1; then

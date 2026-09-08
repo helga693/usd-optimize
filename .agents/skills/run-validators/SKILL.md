@@ -1,10 +1,10 @@
 ---
 name: run-validators
 description: Validate a USD asset with Usd Optimize's performance validators and auto-apply fixes with --fix. Use when checking or repairing a USD.
-version: "4.0.0"
 allowed-tools: Bash
 metadata:
   author: NVIDIA Corporation
+  version: "4.0.0"
   tags: [usd, validation, performance]
 ---
 
@@ -29,10 +29,10 @@ automatically; pass `--fix` to enable it.
 
 - **Usage** — flags and positional args.
 - **Step 1** — validate the input path.
-- **Step 2** — invoke the driver.
+- **Step 2** — invoke the driver, including `--process` for parallel validation on large scenes.
 - **Step 3** — summarize results and hand off.
 - **Errors to handle** — failure modes.
-- **Auto-fix model** — how `IssueFixer` / `--fix` applies fixes and what it cannot.
+- **Auto-fix model** — how `IssueFixer` / `--fix` applies fixes, where it writes, and what it cannot.
 - **Programmatic invocation** — `register_all()` + `ValidationEngine`.
 - **CLI invocation** — `nvidia_usd_validate` setup, the wheel/entry-point requirement, and the `libusd` alignment gotcha.
 - **Adding a new validator** — pointer to the `new-validator` skill.
@@ -49,20 +49,23 @@ One positional argument (the asset) plus optional flags:
 
 | Flag | Meaning |
 |---|---|
-| `ASSET` | Required. `.usd` / `.usda` / `.usdc` / `.usdz`. |
-| `-f` / `--fix` | **Opt-in.** Run `IssueFixer` on every fixable issue, applied **in place** to the input. To keep the source, copy it first and pass the copy (see below). |
+| `ASSET` | Required. `.usd` / `.usda` / `.usdc` / `.usdz`, or a folder of them (read-only runs only — see Limitations). |
+| `-f` / `--fix` | **Opt-in.** Run `IssueFixer` on every fixable issue. Non-destructive by default: writes fixes to a **new file** (`<stem>.fixed<ext>`, or `--fix-output`); the source is untouched unless `--fix-in-place` (or `USD_OPTIMIZE_FIX_IN_PLACE=1`) is set. |
+| `--fix-output <PATH>` | Where `--fix` writes the fixed stage (default `<stem>.fixed<ext>` beside the source). |
+| `--fix-in-place` | Make `--fix` overwrite the **source** (destructive — confirm first). Env: `USD_OPTIMIZE_FIX_IN_PLACE=1`. |
 | `--csv-output <CSV>` | Write a per-issue CSV (all rules). |
-| `--json-output <JSON>` | Write the full validation result as JSON. |
+| `--json-output <JSON>` | Write the full validation result as JSON (`rules[].issues[]`). Carries the same issues as the CSV; `summarize_csv.py` reads either. |
 | `-r RULE` | Enable only a specific rule (repeatable). |
 | `-D RULE` | Disable a specific rule (repeatable). |
 | `-c CATEGORY` | Enable only a specific category (repeatable). |
 | `--parameter NAME=VALUE` | Override a rule parameter (repeatable). |
-| `--verbose` | Also emit one issue per failing prim for count-only rules (see below). |
+| `-v` / `--verbose` | Upstream's verbosity flag. Raises upstream's log level **and** makes count-only rules emit one issue per failing prim (see below). Repeatable — `-vv` for DEBUG logging. |
 | `-p PREDICATE` | Filter output by severity: `IsError`, `IsFailure`, `IsWarning`. |
 | `--group-by requirement\|rule_name` | Group output by requirement or rule. |
 
-Run `tools/validators/run.sh --help` for the full flag list (`--verbose` is
-added by the wrapper, so it won't appear in the upstream `--help`).
+Run `tools/validators/run.sh --help` for the full flag list. `-v` / `--verbose`
+is upstream's own flag: the wrapper reads it *without* consuming it, so one flag
+raises upstream's log level and turns on per-prim reporting.
 
 ### Verbose per-prim reporting
 
@@ -72,11 +75,13 @@ paths never reach the CSV `Location` column. Verbose mode makes those rules also
 emit one issue per failing prim (full path in `Location`), which is what you want
 for CLI/batch debugging. The aggregate summary is still emitted.
 
-Three equivalent ways to enable it, all read at validation time so they work no
+Three ways to enable it, all read at validation time so they work no
 matter how the rules are driven (our wrapper, the upstream CLI, or a direct
 `ValidationEngine`):
 
-- `tools/validators/run.{sh,bat} asset.usd --verbose`
+- `tools/validators/run.{sh,bat} asset.usd -v` (or `--verbose`) — this is
+  upstream's verbosity flag, so it also raises upstream's log level to INFO
+  (`-vv` for DEBUG). The other two forms change reporting only.
 - `USD_OPTIMIZE_VALIDATOR_VERBOSE=1` in the environment
 - `--parameter VERBOSE=true` (or `--parameter <RuleName>.VERBOSE=true`),
   advertised through the standard usd-validation-nvidia parameter system; or
@@ -102,44 +107,58 @@ the wrapper** — invoking the bundled interpreter directly inherits the user's
 `PYTHONPATH` and fails with USD-version mismatches.
 
 **Validation is read-only by default — add `--fix` only when the user asks for
-repairs.** `--fix` modifies the asset you pass **in place**. Pass `--csv-output`
-to save a per-issue CSV for later analysis with `interpret-validators`.
+repairs.** `--fix` is non-destructive: it writes fixes to a **new file**
+(`<stem>.fixed<ext>`, or `--fix-output`) and leaves the source untouched. Pass
+`--csv-output` to save a per-issue CSV for later analysis with
+`interpret-validators`.
 
-POSIX (validate read-only, then opt into `--fix` to repair in place):
+**Get the artifact directory from `resolve_artifacts.py` — don't invent one.**
+The driver has no default `--csv-output`, so artifacts land wherever you put
+them. `interpret-validators` looks them up at a path derived from the asset, so
+writing anywhere else makes its replay lookup report `missing` and every asset
+re-validates from scratch. Pass `--logs-dir` to both scripts if the user wants a
+specific location.
+
+POSIX (validate read-only, then opt into `--fix` to repair into a new file):
 
 ```bash
 ASSET="<path/to/asset.usd>"
-CSV="<artifact_dir>/issues.csv"
-mkdir -p "<artifact_dir>"
+
+ARTIFACT_DIR=$(python3 tools/validators/resolve_artifacts.py "$ASSET" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["artifact_dir"])')
+CSV="$ARTIFACT_DIR/issues.csv"
+mkdir -p "$ARTIFACT_DIR"
 
 # validate (read-only)
-tools/validators/run.sh "$ASSET" --csv-output "$CSV" > "<artifact_dir>/run.log" 2>&1
+tools/validators/run.sh "$ASSET" --csv-output "$CSV" > "$ARTIFACT_DIR/run.log" 2>&1
 
-# to repair: --fix modifies $ASSET in place
-tools/validators/run.sh "$ASSET" --fix --csv-output "$CSV" >> "<artifact_dir>/run.log" 2>&1
+# to repair: --fix writes fixes to a new file (<stem>.fixed<ext>); $ASSET is kept
+tools/validators/run.sh "$ASSET" --fix --csv-output "$CSV" >> "$ARTIFACT_DIR/run.log" 2>&1
 ```
 
 Windows (PowerShell):
 
 ```powershell
 $Asset = "<path\to\asset.usd>"
-$Csv   = "<artifact_dir>\issues.csv"
-New-Item -ItemType Directory -Force -Path "<artifact_dir>" | Out-Null
+
+$ArtifactDir = (& py -3 tools\validators\resolve_artifacts.py $Asset | ConvertFrom-Json).artifact_dir
+$Csv = Join-Path $ArtifactDir "issues.csv"
+New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
 
 # validate (read-only)
-& tools\validators\run.bat $Asset --csv-output $Csv *> "<artifact_dir>\run.log"
+& tools\validators\run.bat $Asset --csv-output $Csv *> (Join-Path $ArtifactDir "run.log")
 
-# to repair: --fix modifies $Asset in place
-& tools\validators\run.bat $Asset --fix --csv-output $Csv *>> "<artifact_dir>\run.log"
+# to repair: --fix writes fixes to a new file (<stem>.fixed<ext>); $Asset is kept
+& tools\validators\run.bat $Asset --fix --csv-output $Csv *>> (Join-Path $ArtifactDir "run.log")
 ```
 
 Redirect to a log file rather than piping through `tail` (pipes buffer until
 the process exits).
 
-**Keeping the original (optional):** `--fix` overwrites the file you pass. If the
-user wants to preserve the source, `--fix` a copy instead — e.g.
-`cp "$ASSET" "$FIXED"` then `tools/validators/run.sh "$FIXED" --fix`. If it isn't
-clear whether the original matters, ask before fixing in place.
+**Output location:** `--fix` writes to a new file by default — `--fix-output
+<path>`, or `<stem>.fixed<ext>` beside the source — so the original is preserved.
+`--fix-in-place` (or `USD_OPTIMIZE_FIX_IN_PLACE=1`) overwrites the source
+instead; it's destructive, so confirm with the user before using it.
 
 ### Long-running execution
 
@@ -153,10 +172,58 @@ slowest). Launch the driver as a long-running command and return control:
 Tell the user it is running and that you will report results when done.
 For a status snapshot: `tail -n 80 "<artifact_dir>/run.log"`.
 
+### Parallel validation on large scenes (`--process`)
+
+`usd-validation-nvidia` runs rules across a process pool when given
+`--process COUNT`; the driver passes unknown flags straight through, so it
+works with no extra tooling:
+
+```bash
+tools/validators/run.sh "$ASSET" --process 4 \
+    --no-defaultRules -c Usd:Performance -c Omni:Geometry --csv-output "$CSV"
+```
+
+**Start at 4 and only raise it if you have headroom to spare.** Each worker opens
+its own copy of the stage, so memory — not core count — is the binding constraint,
+and upstream caps workers with a flat count that knows nothing about available RAM.
+Worker count saturates early, partly because the engine is already internally
+threaded, so past ~4 the extra copies rarely pay for themselves.
+
+Only rules marked `@multiprocess_safe` are pooled — every Usd Optimize rule is,
+via `BaseUsdOptimizeChecker.CheckStage`. Unmarked rules still run inline, so
+coverage is unchanged; the scope flags above are what make the pooling pay off.
+
+**Expect a modest win, and always pair `--process` with a scope flag.** The
+speedup is set by how much of the enabled rule set is poolable: the Usd Optimize
+rules are all marked, but almost none of the base rules are, so a default run
+leaves the base rules — which dominate the wall clock — inline and gains close to
+nothing. It also varies by stage, since one long-pole rule cannot be subdivided
+across workers. Findings are identical either way.
+
+> `--process` is upstream-**experimental** and defaults to `0` (disabled).
+> Combining it with `--fix` is untested — `IssueFixer` mutates a single
+> in-memory stage, so use the serial path when you need a repaired asset.
+>
+> **On Linux the pool forks** — upstream omits `mp_context`, so the platform
+> default applies (fork on Linux, spawn on Windows). If the parent process has
+> already initialized CUDA, a forked worker inherits a dead context and GPU-backed
+> rules fail with `CUDA error: initialization error`, surfacing as FAILURE issues
+> instead of findings. `isCudaAvailable()` caches behind `std::call_once`, so the
+> worker returns the parent's stale verdict and the CPU fallback never fires.
+> Verified on `findOverlappingMeshes`; rules with the same guard (e.g.
+> `deduplicateGeometry`) are exposed the same way. A plain one-shot CLI run does
+> not trip it, because the parent never touches CUDA before forking — but any
+> process that does GPU work and then validates with `--process` will.
+>
+> Spawned workers re-import the rule modules and see them as written, so rule
+> tuning applied by assigning to a class attribute in the driving process never
+> reaches them (verified: a threshold lowered in-process gives 4 issues inline, 1
+> pooled). `--verbose` works that way — do not rely on it under `--process`.
+
 ## Step 3 — Summarize and hand off
 
-When the run finishes, show the last ~40 lines of `run.log` (per-rule issue
-counts and the fix summary) and append:
+When the run finishes, show the last ~40 lines of `run.log` (the per-rule issue
+counts and the severity summary) and append:
 
 ```
 Validation complete.
@@ -167,6 +234,16 @@ Validation complete.
 <N> issues found. <M> were auto-fixed (--fix).
 ```
 
+**Where those two numbers come from.** The driver prints **no aggregate fix
+line**, and the `Summary per Severity:` block at the end of the log is the
+**pre-fix** count — byte-identical whether or not `--fix` ran. So take `<N>`
+from that summary, and get `<M>` by counting the per-issue statuses the fixer
+logs individually as it works (`<message>........FixStatus.SUCCESS`):
+
+```bash
+grep -c 'FixStatus.SUCCESS' "<artifact_dir>/run.log"
+```
+
 **Most issues are fixed automatically.** What remains needs a decision
 (which prims, how aggressive, an accepted trade-off). For those, hand off:
 
@@ -174,9 +251,9 @@ Validation complete.
 > typically need a decision before an operation or preset config can address
 > them.
 
-If `--fix` was used, re-validate the file that was fixed — `$ASSET` if you fixed
-in place, or the copy (`$FIXED`) if you fixed a copy — to confirm the targeted
-rules dropped:
+If `--fix` was used, re-validate the file the fixes landed in — the
+`--fix-output` path (`<stem>.fixed<ext>` by default), or the source itself for
+`--fix-in-place` — to confirm the targeted rules dropped:
 
 ```bash
 tools/validators/run.sh "<the file you fixed>" --csv-output "$CSV"
@@ -189,7 +266,9 @@ Don't interpret the remaining issues here — that's `interpret-validators`.
 | Symptom | Cause | What to tell the user |
 |---|---|---|
 | `Build not found at _build/...` | The repo isn't built | Point at the `build` skill; build first. |
-| Driver exits non-zero | USD open error or plugin import error | Surface the last lines of `run.log`; don't parse a partial CSV. |
+| Driver exits **1** and the log ends with a `Summary per Severity:` block | **Normal** — the run completed and found at least one issue. Warnings alone are enough; only a genuinely clean asset exits 0. | Not a failure. The CSV is complete — parse it as usual. |
+| Driver exits **2** | A wrapper flag guard rejected the command (e.g. `--fix` with no usable asset) | The `error:` line on stderr names the problem; fix the command and re-run. |
+| Driver exits non-zero with **no** severity summary in the log | USD open error or plugin import error | Surface the last lines of `run.log`; don't parse a partial CSV. |
 | `usd-validation-nvidia` install fails in the wrapper | First-run pip install behind a proxy | Set `HTTPS_PROXY` / `HTTP_PROXY` and re-run. |
 | 0 Usd Optimize issues but base-rule issues present | The asset has no `UsdGeomMesh` content (references-only / materials-library / layout stage), so mesh rules find nothing | Expected — not a registration failure. Confirm with `inspect-asset` if unsure. |
 
@@ -278,8 +357,14 @@ See [`new-validator`](../new-validator/SKILL.md) for the full recipe.
 
 ## Limitations
 
-- Runs and auto-fixes in-place; it does not decide how to resolve issues that
-  have no automatic fix — that's `interpret-validators`.
+- `--fix` is opt-in and writes to a new file by default (`--fix-in-place` to
+  overwrite the source); it does not decide how to resolve issues that have no
+  automatic fix — that's `interpret-validators`.
+- **`--fix` needs a single file, not a folder.** Upstream accepts a folder as
+  `ASSET` and read-only validation of one works, but `--fix` has to copy the
+  source to protect it, so a folder exits 2 with `--fix requested but no
+  .usd/.usda/.usdc/.usdz asset was found to protect`. Pass files individually,
+  or use `--fix-in-place` on the folder.
 - Occlusion / overlap rules can take tens of minutes to potential hours on
   large stages.
 - The raw `nvidia_usd_validate` CLI needs the wheel installed and may need the

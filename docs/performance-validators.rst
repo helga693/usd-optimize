@@ -17,20 +17,86 @@ as rules under two categories: **Omni:Geometry** and **Usd:Performance**.
 Registering and running the validators
 ---------------------------------------
 
-The validators are discovered through ``importlib.metadata`` entry points, so the
-``nvidia_usd_validate`` CLI only sees them once the ``usd-optimize`` wheel is
-**pip-installed** (a source-tree ``PYTHONPATH`` alone registers no entry-point
-metadata). Third-party callers that import the package directly can register all
-rules programmatically:
+The rules are discovered through ``importlib.metadata`` entry points, so
+installing the ``usd-optimize`` wheel is all that is required. ``nvidia_usd_validate``
+and any other ``usd-validation-nvidia`` host then pick them up on import, with no
+registration call:
 
 .. code-block:: python
 
-   from usd_optimize.validators import register_all
+   from usd_validation_nvidia import ValidationEngine
+   from pxr import Usd
 
-   register_all()   # registers every Usd Optimize rule with Asset Validator
+   engine = ValidationEngine()          # Usd Optimize rules are already registered
+   results = engine.validate(Usd.Stage.Open("scene.usd"))
+
+A source checkout registers no entry-point metadata, so ``PYTHONPATH`` alone is
+**not** enough there. Register explicitly in that case, importing
+``usd_validation_nvidia`` before ``usd_optimize.validators``:
+
+.. code-block:: python
+
+   import usd_validation_nvidia          # import first
+   from usd_optimize.validators import register_all, unregister_all
+
+   register_all()                        # idempotent; returns the rules it registered
+   ...
+   unregister_all()                      # optional, e.g. to isolate tests
 
 Once registered, the rules run like any other ``usd-validation-nvidia`` rule, and
 report the affected prims along with the operation that would fix them.
+
+Rule names
+----------
+
+Rules are reported as ``UsdOptimize`` plus the class name -- for example
+``UsdOptimizeNonManifoldChecker`` -- so they stay attributable and do not collide
+with identically named upstream rules. The headings below drop that prefix because
+this page is already scoped to Usd Optimize, but the **prefixed** form is what
+appears in ``--help``, in the CSV ``rule`` column, and in the parameter names
+described next.
+
+Setting parameters
+------------------
+
+Many rules expose parameters, listed with each rule below. A parameter can be set
+for every rule that defines it, or for one rule only:
+
+``NAME``
+   applies to every rule defining a parameter of that name.
+
+``UsdOptimizeSomeChecker.NAME``
+   applies to that rule alone, and **overrides** the unqualified form.
+
+Anything left unset keeps the default shown with the rule. From the CLI, pass
+``--parameter NAME=VALUE`` (repeatable):
+
+.. code-block:: bash
+
+   nvidia_usd_validate scene.usd \
+       --parameter VERBOSE=true \
+       --parameter UsdOptimizeNonManifoldChecker.VERBOSE=false
+
+Parallel validation
+-------------------
+
+``usd-validation-nvidia`` can spread rules across a process pool with
+``--process COUNT``, and pools only rules marked ``@multiprocess_safe``. Every
+Usd Optimize rule qualifies, since the marker sits on
+``BaseUsdOptimizeChecker.CheckStage`` and no rule overrides it. Unmarked rules
+still run inline, so findings are identical either way.
+
+This needs ``usd-validation-nvidia`` >= 1.21.0, which the wheel pins. Against an
+older version the marker degrades to a no-op and the rules simply run serially --
+no error, just no speedup.
+
+.. Note:: ``--process`` is upstream-experimental and off by default. The gain
+   depends on how much of the enabled rule set is poolable, so pair it with
+   ``-c Usd:Performance`` / ``-c Omni:Geometry`` rather than running the default
+   rule set. On Linux the pool forks, so a worker inherits a dead CUDA context if
+   the parent already initialized one, and GPU-backed rules then report
+   ``CUDA error: initialization error``; use the serial path for GPU rules and
+   when combining with fixing.
 
 .. GENERATED_DOCS_BEGIN - do not edit manually - see tools/repoman/docs_gen.py
 
@@ -42,6 +108,13 @@ These rules check for stage- and scene-level conditions that affect performance.
 CoincidingGeometryChecker
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Finds cases where two or more prims have coinciding geometry that exists within the same world space in the scene. 
+
+**Parameters:** 
+
+
+- `TOLERANCE`: Tolerance value when comparing points values in world space. Default: `0.001`. 
+- `OFFSET`: An offset to allow prims to be considered coincident. Describes a percentage relative to the prim bounds. Default: `0`. 
+- `FUZZY`: Find geometry that is the same shape but may have different vertex positions/connectivity. Default: `False`. 
 
 DuplicateGeometryChecker
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -67,9 +140,22 @@ FlatHierarchiesChecker
 ^^^^^^^^^^^^^^^^^^^^^^
 Reports prims with a large number of children (a flat hierarchy). 
 
+**Parameters:** 
+
+
+- `MAX_CHILDREN`: The maximum number of children a prim can have until it is considered a flat hierarchy. Default: `500`. 
+- `CONSIDER_ALL_CHILDREN`: Whether to consider all children or only active, loaded, defined, non-abstract children. Default: `True`. 
+
 HighVertexCountChecker
 ^^^^^^^^^^^^^^^^^^^^^^
 Check a stage for meshes with high or extreme vertex counts. 
+
+**Parameters:** 
+
+
+- `LEVEL_HIGH`: Consider prims with this many vertices to have a high vertex count. Default: `100000`. 
+- `LEVEL_VERY_HIGH`: Consider prims with this many vertices to have a very high vertex count. Default: `500000`. 
+- `LEVEL_EXTREME`: Consider prims with this many vertices to have an extreme vertex count. Default: `1000000`. 
 
 InvisiblePrimsChecker
 ^^^^^^^^^^^^^^^^^^^^^
@@ -79,7 +165,7 @@ NormalsChecker
 ^^^^^^^^^^^^^^
 Checks mesh prims for normals aligned to face orientation. 
 
-Returns all prims with normals not aligned with face winding order as a single warning, with an option to fix using scene optimizer operations. 
+Returns all prims with normals not aligned with face winding order as a single warning, with an option to fix using Usd Optimize operations. 
 
 OccludedMeshesChecker
 ^^^^^^^^^^^^^^^^^^^^^
@@ -96,15 +182,36 @@ Uses Usd Optimize to analyze a scene checking for occluded meshes.
 
 PrimitiveFitChecker
 ^^^^^^^^^^^^^^^^^^^
-Check mesh prims that could be replaced with a USD primitive prim, with an option to apply the fix from scene optimizer operation. 
+Check mesh prims that could be replaced with a USD primitive prim, with an option to apply the fix from a Usd Optimize operation. 
+
+**Parameters:** 
+
+
+- `GPU_FACE_COUNT_THRESHOLD`: For meshes with at least this many faces, use GPU algorithm.  A value of zero forces CPU. Default: `0`. 
+- `VERTEX_TOLERANCE`: Relative tolerance of RMS distance from fit vertices to primitive surface. Default: `0.01`. 
+- `VOLUME_TOLERANCE`: Relative tolerance of volume between faces and the fitting primitive. Default: `0.01`. 
+- `IGNORE_SUBSETS`: If set, a mesh with subsets is allowed to be fit.  If replaced by a primitive, any subsets will be lost. Default: `True`. 
+- `ALLOW_NEGATIVE_VOLUME`: If set, a mesh with negative volume (inward-pointing normals) is allowed to be fit. Default: `True`. 
+- `ALLOW_MISSING_ENDCAPS`: If set, a cylinder, cone, or box mesh without endcaps is allowed to be fit. Default: `True`. 
 
 RedundantTimeSamplesChecker
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Uses Usd Optimize to analyze a scene checking for redundant time samples. 
 
+**Parameters:** 
+
+
+- `EPSILON_DOUBLE`: Threshold for which to consider double numbers equal. Default: `1e-12`. 
+- `EPSILON_FLOAT`: Threshold for which to consider floating point numbers equal. Default: `1e-06`. 
+
 RtxMeshCountChecker
 ^^^^^^^^^^^^^^^^^^^
 Check if the number of RTX meshes exceeds recommended limits. 
+
+**Parameters:** 
+
+
+- `RTX_UNIQUE_MESH_COUNT_LIMIT`: The recommended limit for the number of unique RTX meshes in a scene. If the number of unique RTX meshes exceeds this limit, a warning will be issued. Default: `438000`. 
 
 SmallMeshChecker
 ^^^^^^^^^^^^^^^^
@@ -140,11 +247,16 @@ These rules check for low-level geometric defects on meshes. Most are fixed with
 
 ColocatedVerticesChecker
 ^^^^^^^^^^^^^^^^^^^^^^^^
-Check mesh prims for colocated vertices, returns all prims with colocated vertices as a single warning with an option to fix via scene optimizer operation. 
+Check mesh prims for colocated vertices, returns all prims with colocated vertices as a single warning with an option to fix via a Usd Optimize operation. 
+
+**Parameters:** 
+
+
+- `TOLERANCE`: The tolerance (distance) apart for vertices to be considered equal. Default: `0`. 
 
 DuplicateFaceChecker
 ^^^^^^^^^^^^^^^^^^^^
-Check mesh prims for duplicate faces, returns all prims as a single warning with an option to fix via scene optimizer operation. 
+Check mesh prims for duplicate faces, returns all prims as a single warning with an option to fix via a Usd Optimize operation. 
 
 IndexedPrimvarChecker
 ^^^^^^^^^^^^^^^^^^^^^
@@ -156,14 +268,14 @@ This Checker also looks for indexed primvars whose indices are out of bounds, or
 
 IsolatedVerticesChecker
 ^^^^^^^^^^^^^^^^^^^^^^^
-Check mesh prims for isolated vertices, returns all prims as a single warning with an option to fix via scene optimizer operation. 
+Check mesh prims for isolated vertices, returns all prims as a single warning with an option to fix via a Usd Optimize operation. 
 
 NonManifoldChecker
 ^^^^^^^^^^^^^^^^^^
-Check mesh prims for non-manifold geometry, returns all non-manifold prims as a single warning with an option to fix via scene optimizer operation. 
+Check mesh prims for non-manifold geometry, returns all non-manifold prims as a single warning with an option to fix via a Usd Optimize operation. 
 
 ZeroAreaFacesChecker
 ^^^^^^^^^^^^^^^^^^^^
-Check mesh prims for any zero area faces, returns all prims that have zero area faces as single warning with an option to fix using the scene optimizer operation. 
+Check mesh prims for any zero area faces, returns all prims that have zero area faces as a single warning with an option to fix using a Usd Optimize operation. 
 
 .. GENERATED_DOCS_END

@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+from typing import ClassVar, Mapping
+
 from pxr import Usd
 from usd_validation_nvidia import capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.GeometryRequirements.VG_021)
@@ -15,18 +17,11 @@ class HighVertexCountChecker(BaseUsdOptimizeChecker):
     """
 
     OPERATION_NAME: str = "countVertices"
-    OPERATION_ARGS: dict = {}
-
-    LEVEL_HIGH: int = 100000
-    LEVEL_VERY_HIGH: int = 500000
-    LEVEL_EXTREME: int = 1000000
-
-    def _GetArgs(self):
-        """Custom GetArgs function
-
-        Allows configuring the thresholds when testing the operation
-        """
-        return {"high": self.LEVEL_HIGH, "veryHigh": self.LEVEL_VERY_HIGH, "extreme": self.LEVEL_EXTREME}
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {
+        "LEVEL_HIGH": ParameterFromOpArg("high"),
+        "LEVEL_VERY_HIGH": ParameterFromOpArg("veryHigh"),
+        "LEVEL_EXTREME": ParameterFromOpArg("extreme"),
+    }
 
     def _GenerateWarning(self, prim: Usd.Prim, count: int, level: str):
         """Add a warning based on the prim/count"""

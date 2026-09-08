@@ -60,6 +60,7 @@ private:
     UpAxis m_upAxis = UpAxis::eNone;
     bool m_collapseXforms = false;
     bool m_ignoreKitCameras = true;
+    bool m_stopAtSkeletonRoot = false;
 };
 
 } // namespace usd_optimize

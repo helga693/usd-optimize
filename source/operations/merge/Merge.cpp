@@ -66,7 +66,7 @@ MergeOperation::~MergeOperation(){};
 
 std::string MergeOperation::getDocumentation() const
 {
-    return R"DOC(The merge static meshes operation replaces multiple meshes that
+    return std::string(R"DOC(The merge static meshes operation replaces multiple meshes that
 share common properties with a single merged mesh. This reduces scene prim count
 and can improve overall stage performance.
 
@@ -104,7 +104,7 @@ Spatial merge capped by vertex count:
 .. code-block:: json
 
     [{"operation": "merge", "spatialMode": 2, "spatialVertexCount": 50000}]
-)DOC";
+)DOC") + kMergePointDocumentation;
 }
 
 

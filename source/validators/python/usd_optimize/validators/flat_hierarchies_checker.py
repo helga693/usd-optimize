@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+from typing import ClassVar, Mapping
+
 from pxr import Usd
 from usd_validation_nvidia import capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.HierarchyRequirements.HI_011)
@@ -14,17 +16,11 @@ class FlatHierarchiesChecker(BaseUsdOptimizeChecker):
     Reports prims with a large number of children (a flat hierarchy).
     """
 
-    MAX_CHILDREN: int = 500
-    CONSIDER_ALL_CHILDREN: bool = True
-
-    def _GetArgs(self):
-        """Custom GetArgs function
-
-        Allows configuring the thresholds when testing the operation
-        """
-        return {"maxChildren": self.MAX_CHILDREN, "considerAllChildren": self.CONSIDER_ALL_CHILDREN}
-
     OPERATION_NAME: str = "findFlatHierarchies"
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {
+        "MAX_CHILDREN": ParameterFromOpArg("maxChildren"),
+        "CONSIDER_ALL_CHILDREN": ParameterFromOpArg("considerAllChildren"),
+    }
 
     def _CheckStage(self, usdStage: Usd.Stage, analysis_data: dict):
         # verify that the analysis data contains the flat hierarchies

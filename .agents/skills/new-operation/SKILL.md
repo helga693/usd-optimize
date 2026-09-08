@@ -1,10 +1,10 @@
 ---
 name: new-operation
 description: Scaffold a new Usd Optimize operation plugin (C++ source, premake, test, guide, optional validator). Use to add a new op or plugin.
-version: "1.0.0"
 allowed-tools: Shell, Read, Write, Glob, Grep
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [scaffolding, plugin, development]
 ---
 
@@ -66,7 +66,8 @@ derive the key, display name, and description before proceeding.
 | Test file | `test_operation_<snake_case>.py` | `test_operation_remove_overlaps.py` |
 | Operation docs | `getDocumentation()` in `<FileBase>.cpp` → generated `docs/operations/<key>.rst` | `docs/operations/removeOverlaps.rst` |
 | Report category (`<CATEGORY>`) | `UPPER_SNAKE_CASE` short identifier | `REMOVE_OVERLAPS` |
-| Validator class | `UsdOptimize` + `PascalCase` + `Checker` | `UsdOptimizeRemoveOverlapsChecker` |
+| Validator class | `PascalCase` + `Checker`, declared bare | `RemoveOverlapsChecker` |
+| Validator *rule name* (reported) | `UsdOptimize` + the class name | `UsdOptimizeRemoveOverlapsChecker` |
 
 > **File-basename convention is a soft rule.** Premake auto-discovers any `*.cpp` under `source/operations/<key>/`, so the filename isn't enforced. A handful of existing operations diverge (e.g. `fitPrimitives/Primitive.cpp` for `PrimitiveFitOperation`, `subdivideMeshes/Subdivide.cpp` for `SubdivideOperation`). Prefer the convention for new operations; don't rename existing ones just to match.
 
@@ -135,14 +136,16 @@ protected:
     OperationResult executeImpl() override
     {
         // TODO: implement
-        return OperationResult::eSuccess;
+        // OperationResult is a struct (usd_optimize/core/Defs.h), not an enum:
+        // { true } is success, { false, getCStr(error) } reports a failure.
+        return { true };
     }
 
     // Uncomment if the operation supports analysis mode:
     // OperationResult executeAnalysisImpl() override
     // {
     //     // TODO: implement analysis (read-only inspection)
-    //     return OperationResult::eSuccess;
+    //     return { true };
     // }
 
 private:
@@ -347,7 +350,7 @@ returns success).
 ## Limitations
 
 - The scaffold compiles but does **not** implement the operation logic
-  — `executeImpl()` returns `eSuccess` as a stub. The author wires up
+  — `executeImpl()` returns `{ true }` as a stub. The author wires up
   the actual algorithm in a follow-up pass.
 - The generated guide leaves Overview / Tuning Order / Visual Diagnosis
   sections marked with HTML-comment TODO markers (literal text

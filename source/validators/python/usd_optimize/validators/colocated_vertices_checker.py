@@ -3,36 +3,54 @@
 #
 
 from functools import partial
-from typing import List
+from typing import ClassVar, List, Mapping
 
 from pxr import Usd
 from usd_optimize.core import analysis
 from usd_validation_nvidia import Suggestion, capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.GeometryRequirements.VG_016, override=True)
 class ColocatedVerticesChecker(BaseUsdOptimizeChecker):
     """
-    Check mesh prims for colocated vertices, returns all prims with colocated vertices as a single warning with an option to fix via scene optimizer operation.
+    Check mesh prims for colocated vertices, returns all prims with colocated vertices as a single warning with an option to fix via a Usd Optimize operation.
     """
 
     OPERATION_NAME: str = "meshCleanup"
 
-    @classmethod
-    def _mesh_merge_vertices(cls, usdStage: Usd.Stage, prim: Usd.Prim) -> None:
+    # Analysis must request only the coincident-vertex fixes: the gated checkClean reports a defect
+    # only if its fix is enabled, so both merge modes are needed to see either defect. Mirrors
+    # _mesh_merge_vertices. Leaving this unset falls through to the operation's C++ ctor defaults,
+    # which additionally enable DegenerateEdges -- and pairing that with CoincidentNeighborVertices
+    # corrupts the heap inside omo::checkClean.
+    OPERATION_ARGS = {
+        "mergeVertices": True,
+        "tolerance": 0.0,
+        "contractDegenerateEdges": False,
+        "removeDegenerateFaces": False,
+        "makeManifold": False,
+        "removeIsolatedVertices": False,
+        "mergeBoundaries": True,
+        "mergeNeighbors": True,
+        "removeDuplicateFaces": False,
+    }
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {"TOLERANCE": ParameterFromOpArg("tolerance", default=0.0)}
+
+    def _mesh_merge_vertices(self, usdStage: Usd.Stage, prim: Usd.Prim) -> None:
         """
         Cleanup meshes by merging vertices using Usd Optimize
         """
 
-        # Configure mesh cleanup
+        # Configure mesh cleanup, honoring the tuned TOLERANCE parameter so the
+        # fix merges vertices with the same tolerance used during analysis.
         operations: List[analysis.OperationConfig] = [
             analysis.OperationConfig(
-                cls.OPERATION_NAME,
+                self.OPERATION_NAME,
                 args={
                     "mergeVertices": True,
-                    "tolerance": 0.0,
+                    "tolerance": self._effective_args()["tolerance"],
                     "mergeBoundaries": True,
                     "mergeNeighbors": True,
                     "contractDegenerateEdges": False,

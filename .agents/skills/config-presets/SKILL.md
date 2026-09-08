@@ -1,10 +1,10 @@
 ---
 name: config-presets
 description: Choose and run a ready-made preset operation stack from config_presets/. Use when you want a known-good starting point for a common optimization goal rather than assembling a custom config.
-version: "1.0.0"
 allowed-tools: Shell, Read
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [usd, optimization, presets, config]
 ---
 
@@ -19,16 +19,34 @@ baseline before considering custom tuning.
 
 ## What this skill covers
 
+- **Usage** — the one-line invocation.
 - **Preset table** — the six presets, their effect, and whether they are lossless.
 - **Step 1** — pick a preset for the user's goal.
 - **Step 2** — run the preset.
 - **Step 3** — customize if needed.
+- **Troubleshooting** — symptoms, causes, and what to tell the user.
+- **Purpose / Prerequisites / Limitations** — scope of the skill.
 
 Companion skills: [`run-operations`](../run-operations/SKILL.md) (CLI usage,
 flags, error handling), [`tune-parameters`](../tune-parameters/SKILL.md)
 (iterate a single operation's parameters after running a preset).
 
 ---
+
+## Usage
+
+```bash
+# POSIX
+_build/linux-x86_64/release/bin/usdOptimize -i in.usd -c config_presets/safe-cleanup.json -s -r -w out.usd
+```
+
+```powershell
+# Windows: use the .bat launcher, not usdOptimize.exe
+_build\windows-x86_64\release\bin\usdOptimize.bat -i in.usd -c config_presets\safe-cleanup.json -s -r -w out.usd
+```
+
+Presets live in `config_presets/` at the repo root, and ship in the same
+directory in a packaged drop. List them with `ls config_presets/`.
 
 ## Preset table
 
@@ -81,3 +99,40 @@ guidance on which operations help which goal is in
 
 For interactive parameter tuning on a single operation, use
 [`/tune-parameters`](../tune-parameters/SKILL.md).
+
+To verify a preset did what you expected, re-run with `-an` for analysis only,
+or compare before/after with [`compare-stages`](../compare-stages/SKILL.md).
+The `-s` stats block in the log reports prim and mesh counts either side.
+
+## Troubleshooting
+
+| Symptom | Cause | What to tell the user |
+|---|---|---|
+| Binary missing under `_build/.../bin/` | Repo not built | Point at the `build` skill; build first. |
+| `config_presets/<name>.json` not found | Run from the wrong directory, or a drop older than 1.2.0 (presets were not packaged before then) | Run from the repo/drop root; check `ls config_presets/`. |
+| Windows: exit `-1073741515` | Ran `usdOptimize.exe` directly; it cannot resolve its DLLs | Use `bin\usdOptimize.bat`. `PATHEXT` picks the `.exe` first, so name the `.bat`. |
+| `Failed to open stage` | Bad or unsupported input path | Verify the path is a real USD stage (`inspect-asset`). |
+| CLI exits non-zero mid-chain | One operation in the stack failed | Surface the failing op line from the log; the rest of the stack did not run. |
+| Ran clean but the stage looks unchanged | The preset's operations found nothing to do on this asset | Confirm with `run-validators` that the issues the preset targets are actually present. |
+| `Unknown argument '<key>' ... ignoring it` | A hand-edited preset has a typo'd argument name | Check the key against `docs/operations/<key>.rst`; the op ran with its default. |
+
+## Purpose
+
+Pick and run a ready-made operation stack from `config_presets/`, so a common
+optimization goal can be met without assembling a config by hand. Use it as the
+known-good baseline before reaching for custom tuning.
+
+## Prerequisites
+
+- A built repo (or a drop) so `bin/usdOptimize` exists — see the `build` skill.
+- A USD asset (`.usd` / `.usda` / `.usdc` / `.usdz`).
+- A goal that maps to one of the six presets; otherwise use `run-operations`.
+
+## Limitations
+
+- Presets are fixed stacks: they expose no per-operation arguments. To change a
+  value, copy the JSON and edit it (Step 3), then run it via `run-operations`.
+- Two presets are not lossless (`data-quality-baseline`, `mesh-count-reduction`).
+  Never run those in place on a source asset without a backup.
+- Running two presets in sequence repeats operations they share, which is
+  wasteful but not harmful. Combining their operation lists is usually better.

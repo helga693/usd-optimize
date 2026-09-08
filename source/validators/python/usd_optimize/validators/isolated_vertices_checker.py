@@ -14,7 +14,7 @@ from .base_usd_optimize_checker import BaseUsdOptimizeChecker
 @register_requirements(capabilities.GeometryRequirements.VG_018, override=True)
 class IsolatedVerticesChecker(BaseUsdOptimizeChecker):
     """
-    Check mesh prims for isolated vertices, returns all prims as a single warning with an option to fix via scene optimizer operation.
+    Check mesh prims for isolated vertices, returns all prims as a single warning with an option to fix via a Usd Optimize operation.
     """
 
     OPERATION_NAME: str = "meshCleanup"

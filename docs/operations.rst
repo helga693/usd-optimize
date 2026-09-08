@@ -18,9 +18,10 @@ processed.** Path expressions are supported.
    the desired variant compositions.
 
 .. Note:: **Native CLI vs. Python host.** Most operations are built-in (C++)
-   plugins available everywhere Usd Optimize runs. Three operations —
-   ``pythonScript``, ``deleteHiddenPrims``, and ``removeUntypedPrims`` — are
-   implemented as Python plugins. These require a Python-hosted runtime and are
+   plugins available everywhere Usd Optimize runs. Four operations —
+   ``pythonScript``, ``deleteHiddenPrims``, ``removeUntypedPrims``, and
+   ``moveMaterials`` — are implemented as Python plugins. These require a
+   Python-hosted runtime and are
    available through the ``usd-optimize`` Python wheel / bindings, but **not**
    from the standalone ``bin/usdOptimize`` CLI, which does not initialize a
    Python interpreter. Invoking one of them from the native CLI reports
@@ -57,6 +58,7 @@ processed.** Path expressions are supported.
     Merge Static Meshes <operations/merge>
     Merge Vertices <operations/mergeVertices>
     Mesh Cleanup <operations/meshCleanup>
+    Move Materials <operations/moveMaterials>
     Optimize Materials <operations/optimizeMaterials>
     Optimize Primvars <operations/optimizePrimvars>
     Optimize Skeleton Roots <operations/optimizeSkelRoots>
@@ -112,6 +114,7 @@ processed.** Path expressions are supported.
     :doc:`Merge Static Meshes<operations/merge>`                             Merge individual meshes.
     :doc:`Merge Vertices<operations/mergeVertices>`                          This operation merges vertices that are closer to one another than a given tolerance, followed by removing any degenerate faces and optionally making the resulting mesh be manifold and/or removing any isolated vertices.
     :doc:`Mesh Cleanup<operations/meshCleanup>`                              Applies various cleanups to meshes.
+    :doc:`Move Materials [Python only]<operations/moveMaterials>`            Moves all materials under a prim location such as "/World/Looks" and can also set the root prim of the path (e.g. "/World") as the default prim
     :doc:`Optimize Materials<operations/optimizeMaterials>`                  Run operations to optimize materials in a stage.
     :doc:`Optimize Primvars<operations/optimizePrimvars>`                    Flatten or index primvars, or check whether they can be simplified, for example reducing from faceVarying to uniform..
     :doc:`Optimize Skeleton Roots<operations/optimizeSkelRoots>`             Merge all meshes for meshes attached to a skeleton. This can greatly improve character playback speed by optimizing scenes for GPU skinning computation.
@@ -133,7 +136,7 @@ processed.** Path expressions are supported.
     :doc:`Stats<operations/printStats>`                                      Collect and display statistics about the contents of a USD stage
     :doc:`Subdivide Meshes<operations/subdivideMeshes>`                      Apply Catmull-Clark or Loop subdivision iterations to meshes.
     :doc:`Triangulate Meshes<operations/triangulateMeshes>`                  Converts polygonal meshes to triangle-only meshes.
-    :doc:`Utility Function<operations/utilityFunction>`                      Helper functions to pre-process components for scene optimizer operations..
+    :doc:`Utility Function<operations/utilityFunction>`                      Helper functions to pre-process components for Usd Optimize operations.
     ======================================================================== ===========================================================================================================================================================================================================================
 
 

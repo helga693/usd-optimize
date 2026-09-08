@@ -5,7 +5,7 @@
 
 The mapping below is the source of truth for the `Fix tier` and `Operation`
 columns presented in the Step 4 summary table. **To verify a rule's backing operation**, grep `OPERATION_NAME` in
-`source/core/python/usd_optimize/validators/<module>.py`. The
+`source/validators/python/usd_optimize/validators/<module>.py`. The
 authoritative list of registered rules is the `_RULE_CATEGORIES` tuple in
 `validators/__init__.py`.
 
@@ -87,8 +87,12 @@ path even when the rule itself is upstream.
 | `ManifoldChecker` | `meshCleanup` (some non-manifold cases need DCC) | T2 |
 
 When marking these in the summary table, label the tier as `T1-equiv` /
-`T2-equiv` so the user knows the fix is a Usd Optimize op, not the
-validator's own `--fix` (this repo's validators don't ship a `--fix` mode).
+`T2-equiv` so the user knows the remedy is a Usd Optimize operation they
+run themselves, rather than a fix the validator applies for them.
+
+(Usd Optimize's *own* rules are different: most attach a `Suggestion`, so
+`IssueFixer` can apply them and `tools/validators/run.sh <asset> --fix`
+drives exactly that. The base rules in the table above do not.)
 
 
 For rules not in this list, treat as **T3 / manual** and surface the CSV

@@ -18,7 +18,7 @@ class NormalsChecker(BaseUsdOptimizeChecker):
     Checks mesh prims for normals aligned to face orientation.
 
     Returns all prims with normals not aligned with face winding order as a single warning, with an option
-    to fix using scene optimizer operations.
+    to fix using Usd Optimize operations.
 
     """
 

@@ -20,6 +20,8 @@ VARIANTS_TEST_FILE = "editStageMetrics_variants.usda"
 UP_AXIS_CORRECTION_TEST_FILE = "editStageMetrics_upAxisCorrection.usda"
 PHYSICS_TEST_FILE = "editStageMetrics_physics.usda"
 KIT_CAMERAS_TEST_FILE = "editStageMetrics_kitCameras.usda"
+SKELETON_TEST_FILE = "editStageMetrics_skeleton.usda"
+SKEL_ROOT_PATH = "/World/Skel"
 
 CONFIG_SCALE_TO_METERS = "scaleToMeters.json"
 CONFIG_SCALE_TO_CENTIMETERS = "scaleToCenitmeters.json"
@@ -65,6 +67,8 @@ def _get_worldspace_points(prim, xformCache):
 
 
 class Test_Operation_EditStageMetrics(Test_Operation):
+
+    OPERATION = "editStageMetrics"
 
     def _open_stages(self, file_path):
         layer = Sdf.Layer.OpenAsAnonymous(_get_test_data_file_path(file_path))
@@ -1225,3 +1229,203 @@ class Test_Operation_EditStageMetrics(Test_Operation):
 
         self._assert_vectors_equal(persp_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3f(5.0, -5.0, 5.0))
         self._assert_vectors_equal(persp_prim.GetAttribute("xformOp:rotateXYZ").Get(), Gf.Vec3f(-35, 0.0, 45.0))
+
+    def _assert_skeleton_hierarchy_unprocessed(self, stage):
+        """Asserts that every prim below the SkelRoot is left exactly as authored."""
+        root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/Skeleton/Root")
+        self._assert_vectors_equal(root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(1, 2, 3))
+        self.assertEqual(list(root_prim.GetAttribute("xformOpOrder").Get()), ["xformOp:translate"])
+
+        child_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/Skeleton/Root/Child")
+        self._assert_vectors_equal(child_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(4, 5, 6))
+        self._assert_vectors_equal(child_prim.GetAttribute("xformOp:rotateXYZ").Get(), Gf.Vec3d(10, 20, 30))
+
+        grandchild_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/Skeleton/Root/Child/GrandChild")
+        self._assert_vectors_equal(grandchild_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(7, 8, 9))
+
+        # geometry inside the skeleton hierarchy is left untouched too
+        mesh_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/SkinnedMesh")
+        points = mesh_prim.GetAttribute("points").Get()
+        self._assert_vectors_equal(points[0], Gf.Vec3f(-1, -2, -3))
+        self._assert_vectors_equal(points[1], Gf.Vec3f(1, 2, 3))
+        extent = mesh_prim.GetAttribute("extent").Get()
+        self._assert_vectors_equal(extent[0], Gf.Vec3f(-1, -2, -3))
+        self._assert_vectors_equal(extent[1], Gf.Vec3f(1, 2, 3))
+
+    async def test_stopAtSkeletonRoot_scale(self):
+        """
+        Tests that with stopAtSkeletonRoot enabled, changing the metersPerUnit applies a single scale xformOp to the
+        SkelRoot prim of a skeleton and leaves the entire hierarchy below it unprocessed.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        # change metersPerUnit from 0.01 to 1.0 (scale = 0.01)
+        scale = 0.01
+        self._execute_command({"metersPerUnit": 1.0, "upAxis": 0, "stopAtSkeletonRoot": True})
+
+        # the skeleton root gets a scale op prepended to its xformOpOrder so it is the outermost transform - this
+        # scales the skeleton root's own translation as well as everything below it, so the translate itself is left
+        # as authored
+        skel_root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH)
+        self._assert_vectors_equal(
+            skel_root_prim.GetAttribute("xformOp:scale:skeletonMetricsCorrection").Get(), Gf.Vec3d(scale, scale, scale)
+        )
+        self.assertEqual(
+            list(skel_root_prim.GetAttribute("xformOpOrder").Get()),
+            ["xformOp:scale:skeletonMetricsCorrection", "xformOp:translate"],
+        )
+        self._assert_vectors_equal(skel_root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(10, 20, 30))
+
+        self._assert_skeleton_hierarchy_unprocessed(stage)
+
+        # prims outside the skeleton are still processed normally
+        outside_prim = stage.GetPrimAtPath("/World/Outside")
+        self._assert_vectors_equal(
+            outside_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(100 * scale, 200 * scale, 300 * scale)
+        )
+
+    async def test_stopAtSkeletonRoot_upAxis(self):
+        """
+        Tests that with stopAtSkeletonRoot enabled, changing the upAxis applies a single rotation xformOp to the
+        SkelRoot prim of a skeleton and leaves the entire hierarchy below it unprocessed.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        # change upAxis from Y to Z
+        self._execute_command({"metersPerUnit": 0.0, "upAxis": 2, "stopAtSkeletonRoot": True})
+
+        # the skeleton root gets a rotation op prepended to its xformOpOrder so it is the outermost transform - this
+        # rotates the skeleton root's own translation as well as everything below it
+        skel_root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH)
+        self.assertAlmostEqual(skel_root_prim.GetAttribute("xformOp:rotateX:skeletonMetricsCorrection").Get(), 90.0)
+        self.assertEqual(
+            list(skel_root_prim.GetAttribute("xformOpOrder").Get()),
+            ["xformOp:rotateX:skeletonMetricsCorrection", "xformOp:translate"],
+        )
+        self._assert_vectors_equal(skel_root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(10, 20, 30))
+
+        self._assert_skeleton_hierarchy_unprocessed(stage)
+
+        # prims outside the skeleton are still processed normally
+        outside_prim = stage.GetPrimAtPath("/World/Outside")
+        self._assert_vectors_equal(outside_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(100, -300, 200))
+
+    async def test_stopAtSkeletonRoot_upAxisZtoY(self):
+        """
+        Tests that with stopAtSkeletonRoot enabled, changing the upAxis from Z to Y applies the inverse rotation to the
+        SkelRoot prim.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        # first move the stage to Z up so we can change it back to Y up
+        self._execute_command({"metersPerUnit": 0.0, "upAxis": 2})
+        self._execute_command({"metersPerUnit": 0.0, "upAxis": 1, "stopAtSkeletonRoot": True})
+
+        skel_root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH)
+        self.assertAlmostEqual(skel_root_prim.GetAttribute("xformOp:rotateX:skeletonMetricsCorrection").Get(), -90.0)
+
+    async def test_stopAtSkeletonRoot_scaleAndUpAxis(self):
+        """
+        Tests that with stopAtSkeletonRoot enabled, changing both the metersPerUnit and upAxis prepends both a scale
+        and a rotation xformOp to the SkelRoot prim of a skeleton.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        scale = 0.01
+        self._execute_command({"metersPerUnit": 1.0, "upAxis": 2, "stopAtSkeletonRoot": True})
+
+        skel_root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH)
+        self._assert_vectors_equal(
+            skel_root_prim.GetAttribute("xformOp:scale:skeletonMetricsCorrection").Get(), Gf.Vec3d(scale, scale, scale)
+        )
+        self.assertAlmostEqual(skel_root_prim.GetAttribute("xformOp:rotateX:skeletonMetricsCorrection").Get(), 90.0)
+        self.assertEqual(
+            list(skel_root_prim.GetAttribute("xformOpOrder").Get()),
+            [
+                "xformOp:scale:skeletonMetricsCorrection",
+                "xformOp:rotateX:skeletonMetricsCorrection",
+                "xformOp:translate",
+            ],
+        )
+        self._assert_vectors_equal(skel_root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(10, 20, 30))
+
+        self._assert_skeleton_hierarchy_unprocessed(stage)
+
+    async def test_stopAtSkeletonRoot_resetXformStack(self):
+        """
+        Tests that the correction ops are inserted after a "!resetXformStack!" token rather than in front of it.
+
+        USD only honours the reset token as the first entry of the xformOpOrder and discards any ops that precede it,
+        so prepending the corrections in front of it would silently drop them and leave the skeleton uncorrected.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        scale = 0.01
+        self._execute_command({"metersPerUnit": 1.0, "upAxis": 2, "stopAtSkeletonRoot": True})
+
+        skel_root_prim = stage.GetPrimAtPath("/World/SkelResetsXformStack")
+        self.assertEqual(
+            list(skel_root_prim.GetAttribute("xformOpOrder").Get()),
+            [
+                "!resetXformStack!",
+                "xformOp:scale:skeletonMetricsCorrection",
+                "xformOp:rotateX:skeletonMetricsCorrection",
+                "xformOp:translate",
+            ],
+        )
+
+        # the reset is still honoured and both corrections contribute to the composed transform
+        xformable = UsdGeom.Xformable(skel_root_prim)
+        self.assertTrue(xformable.GetResetXformStack())
+        self.assertEqual(len(xformable.GetOrderedXformOps()), 3)
+
+        # the skeleton root's translation ends up scaled and rotated into the new up axis by the corrections
+        world_point = UsdGeom.XformCache().GetLocalToWorldTransform(skel_root_prim).Transform(Gf.Vec3d(0, 0, 0))
+        self._assert_vectors_equal(world_point, Gf.Vec3d(10 * scale, -30 * scale, 20 * scale))
+
+    async def test_stopAtSkeletonRoot_worldSpaceUnchanged(self):
+        """
+        Tests that the single correction applied at the skeleton root leaves the geometry inside the skeleton in the
+        same world space position as processing every prim in the hierarchy individually would.
+
+        Note: the joints themselves cannot be used for this comparison since OmniJoint has no schema registered here,
+        so UsdGeom does not treat the joints as xformable. The skinned mesh sits under the same skeleton root and is
+        subject to exactly the same correction, so it is used instead.
+        """
+
+        def _get_world_points(file_path, args):
+            stage = self._open_stage(file_path)
+            self._execute_command(args)
+            mesh_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/SkinnedMesh")
+            xform = UsdGeom.XformCache().GetLocalToWorldTransform(mesh_prim)
+            return [xform.Transform(point) for point in mesh_prim.GetAttribute("points").Get()]
+
+        args = {"metersPerUnit": 1.0, "upAxis": 2}
+        stopped_points = _get_world_points(SKELETON_TEST_FILE, dict(args, stopAtSkeletonRoot=True))
+        processed_points = _get_world_points(SKELETON_TEST_FILE, args)
+
+        self.assertEqual(len(stopped_points), len(processed_points))
+        for stopped_point, processed_point in zip(stopped_points, processed_points):
+            self._assert_vectors_equal(stopped_point, processed_point)
+
+    async def test_stopAtSkeletonRoot_disabled(self):
+        """
+        Tests that by default (stopAtSkeletonRoot disabled) every prim in the skeleton hierarchy is processed normally
+        and no correction xformOps are added.
+        """
+        stage = self._open_stage(SKELETON_TEST_FILE)
+        scale = 0.01
+        self._execute_command({"metersPerUnit": 1.0, "upAxis": 0})
+
+        # the skeleton is processed normally so its translations are scaled and no correction op is added
+        skel_root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH)
+        self.assertFalse(skel_root_prim.HasAttribute("xformOp:scale:skeletonMetricsCorrection"))
+        self._assert_vectors_equal(
+            skel_root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(10 * scale, 20 * scale, 30 * scale)
+        )
+        root_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/Skeleton/Root")
+        self._assert_vectors_equal(
+            root_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(1 * scale, 2 * scale, 3 * scale)
+        )
+        child_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/Skeleton/Root/Child")
+        self._assert_vectors_equal(
+            child_prim.GetAttribute("xformOp:translate").Get(), Gf.Vec3d(4 * scale, 5 * scale, 6 * scale)
+        )
+        mesh_prim = stage.GetPrimAtPath(SKEL_ROOT_PATH + "/SkinnedMesh")
+        points = mesh_prim.GetAttribute("points").Get()
+        self._assert_vectors_equal(points[1], Gf.Vec3f(1 * scale, 2 * scale, 3 * scale))

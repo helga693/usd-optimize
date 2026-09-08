@@ -11,6 +11,7 @@ from usd_optimize.validators import (
     DuplicateGeometryChecker,
     DuplicateMaterialsChecker,
     EmptyLeafChecker,
+    FindOverlappingMeshesChecker,
     FlatHierarchiesChecker,
     FuzzyDuplicateGeometryChecker,
     HighVertexCountChecker,
@@ -30,7 +31,7 @@ from usd_optimize.validators import (
     ZeroAreaFacesChecker,
     ZeroExtentChecker,
 )
-from usd_validation_nvidia import IssuePredicates
+from usd_validation_nvidia import IssuePredicates, UserParameter, ValidationEngine
 from usd_validation_nvidia.tests import IsAnError, IsAnInfo, IsAWarning, ValidationTestCaseMixin
 
 from .test_utils import _get_test_data_file_path
@@ -234,6 +235,21 @@ class Test_Checkers(TestCase, ValidationTestCaseMixin):
             ],
         )
 
+    def test_find_overlapping_meshes_checker(self):
+        # Locations must stay a tuple: usd-validation-nvidia's CLI only renders
+        # multi-location issues for tuples and raises on the list its own
+        # _AddWarning signature documents, losing every result in the run. An
+        # assertRule check cannot catch that -- it never reaches the CLI -- so
+        # pin the shape here.
+        result = self.validate(
+            asset=_get_test_data_file_path("coincidingMeshes.usda"),
+            rule=FindOverlappingMeshesChecker,
+        )
+        issues = list(result.issues())
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].message, "Found 2 overlapping meshes in the stage.")
+        self.assertIsInstance(issues[0].at, tuple)
+
     # TODO: fix me
     # def test_primitive_fit_checker(self):
     #     self.assertRule(
@@ -361,16 +377,18 @@ class Test_Checkers(TestCase, ValidationTestCaseMixin):
     def test_flat_hierarchies_checker(self):
         """Test the FlatHierarchiesChecker"""
 
-        # override the max children to only 5 so we don't need a large test scene
-        FlatHierarchiesChecker.MAX_CHILDREN = 5
+        # MAX_CHILDREN is a tunable parameter sourced from the operation's op arg.
+        # Override it to 5 (via the engine parameter) so we don't need a large
+        # test scene; assertRule can't pass parameters, so drive the engine directly.
+        engine = ValidationEngine(init_rules=False)
+        engine.enable_rule(FlatHierarchiesChecker)
+        engine.add_parameter(UserParameter(parameter=engine.parameters["MAX_CHILDREN"], assigned_value=5))
 
-        self.assertRule(
-            asset=_get_test_data_file_path("flatHierarchies.usd"),
-            rule=FlatHierarchiesChecker,
-            asserts=[
-                IsAWarning("Found 6 children under prim '/World/Xform_01'"),
-            ],
-        )
+        result = engine.validate(_get_test_data_file_path("flatHierarchies.usd"))
+
+        issues = result.issues()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(IsAWarning("Found 6 children under prim '/World/Xform_01'"), issues[0])
 
     def test_normals_checker(self):
         """Test for normals checker"""
@@ -529,22 +547,26 @@ class Test_Checkers(TestCase, ValidationTestCaseMixin):
     def test_high_vertex_count_checker(self):
         """Test the HighVertexCountChecker"""
 
-        # Override the levels for smaller numbers based on the
-        # test data. This is just to avoid having to check in
-        # a much larger USD file.
-        HighVertexCountChecker.LEVEL_HIGH = 40000
-        HighVertexCountChecker.LEVEL_VERY_HIGH = 60000
-        HighVertexCountChecker.LEVEL_EXTREME = 150000
+        # The levels are tunable parameters sourced from the operation's op args.
+        # Override them to smaller numbers based on the test data (to avoid checking
+        # in a much larger USD file); assertRule can't pass parameters, so drive the
+        # engine directly.
+        engine = ValidationEngine(init_rules=False)
+        engine.enable_rule(HighVertexCountChecker)
+        for name, value in (("LEVEL_HIGH", 40000), ("LEVEL_VERY_HIGH", 60000), ("LEVEL_EXTREME", 150000)):
+            engine.add_parameter(UserParameter(parameter=engine.parameters[name], assigned_value=value))
 
-        self.assertRule(
-            asset=_get_test_data_file_path("countVerts.usd"),
-            rule=HighVertexCountChecker,
-            asserts=[
-                IsAWarning("Mesh has high vertex count*", at="Prim </Geometry/MeshHigh/mesh_0>"),
-                IsAWarning("Mesh has very high vertex count*", at="Prim </Geometry/MeshVeryHigh/mesh_0>"),
-                IsAWarning("Mesh has extreme vertex count*", at="Prim </Geometry/MeshExtreme/mesh_0>"),
-            ],
-        )
+        result = engine.validate(_get_test_data_file_path("countVerts.usd"))
+
+        asserts = [
+            IsAWarning("Mesh has high vertex count*", at="Prim </Geometry/MeshHigh/mesh_0>"),
+            IsAWarning("Mesh has very high vertex count*", at="Prim </Geometry/MeshVeryHigh/mesh_0>"),
+            IsAWarning("Mesh has extreme vertex count*", at="Prim </Geometry/MeshExtreme/mesh_0>"),
+        ]
+        issues = result.issues()
+        self.assertEqual(len(issues), len(asserts))
+        for assertion, issue in zip(asserts, issues):
+            self.assertEqual(assertion, issue)
 
     def test_unused_uvs_checker(self):
         """Test the Unused UVs checker"""
@@ -570,12 +592,17 @@ class Test_Checkers(TestCase, ValidationTestCaseMixin):
     def test_rtx_mesh_count_checker(self):
         """Test the RtxMeshCountChecker"""
 
-        RtxMeshCountChecker.RTX_UNIQUE_MESH_COUNT_LIMIT = 6
-
-        self.assertRule(
-            asset=_get_test_data_file_path("validate_rtxMeshCount.usda"),
-            rule=RtxMeshCountChecker,
-            asserts=[
-                IsAWarning("Number of unique RTX meshes (7) exceeds the recommended limit of 6."),
-            ],
+        # RTX_UNIQUE_MESH_COUNT_LIMIT is a tunable parameter (not an op arg).
+        # Override it to 6 (via the engine parameter) so the small test scene
+        # exceeds it; assertRule can't pass parameters, so drive the engine directly.
+        engine = ValidationEngine(init_rules=False)
+        engine.enable_rule(RtxMeshCountChecker)
+        engine.add_parameter(
+            UserParameter(parameter=engine.parameters["RTX_UNIQUE_MESH_COUNT_LIMIT"], assigned_value=6)
         )
+
+        result = engine.validate(_get_test_data_file_path("validate_rtxMeshCount.usda"))
+
+        issues = result.issues()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(IsAWarning("Number of unique RTX meshes (7) exceeds the recommended limit of 6."), issues[0])
