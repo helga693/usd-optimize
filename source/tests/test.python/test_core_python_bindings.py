@@ -87,7 +87,7 @@ class TestCorePythonBindings(unittest.TestCase):
         """
         Test getting and executing operations on UsdOptimizeCore.
         """
-        # create a new scene optimizer core and check that a non-zero number of operations have loaded
+        # create a new Usd Optimize core and check that a non-zero number of operations have loaded
         so_core = UsdOptimizeCore.getInstance()
         self.assertTrue(len(so_core.getOperations()) > 0)
 

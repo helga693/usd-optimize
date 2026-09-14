@@ -1,10 +1,10 @@
 ---
 name: interpret-validators
 description: Read saved validator artifacts and triage the issues that --fix could not auto-resolve, with per-rule prim lists and fix recommendations. Use after run-validators to decide what to do about remaining issues.
-version: "1.0.0"
 allowed-tools: Bash, Read
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [validation, reporting, analysis]
 ---
 
@@ -54,16 +54,13 @@ Operation arguments and tuning guidance for any fix op live in
 
 ## What this skill covers
 
-Each section below is load-bearing — read past Step 4 before concluding info is missing. Search for keywords like `family`, `base`, `Usd Optimize`, `unfixed`, `Tier`, `T1`, `T2`, `T3`, `headline takeaway`, `findings`, `Rule reference` to jump.
+Each section below is load-bearing — read past Step 4 before concluding info is missing. Search for keywords like `family`, `base`, `Usd Optimize`, `unfixed`, `Tier`, `T1`, `T2`, `T3`, `headline takeaway`, `Rule reference` to jump.
 
 - **Usage** — what arguments are accepted, what follow-up questions it answers.
-- **Step 1** — resolve the input (asset / CSV / summary JSON), including branching
-  to partial-report derivation when summary mode lacks a sibling CSV but carries
-  `findings`.
+- **Step 1** — resolve the input (asset / CSV / JSON).
 - **Step 2** — fresh / stale / missing decision for replay vs re-run.
-- **Step 3** — summarize the CSV via `summarize_csv.py` when a CSV exists
-  (**bypass:** project embedded `findings` analysis payloads when CSV is
-  missing — § Partial-report mode). Summarizer already lowercases severity,
+- **Step 3** — summarize the report via `summarize_csv.py`, which reads either the
+  CSV or the JSON. Summarizer already lowercases severity,
   classifies family, normalizes locations, groups failures, sorts rules.
 - **Step 4** — present the report (header + summary table with `family` column showing both base and Usd Optimize rules, failure details, headline takeaway).
 - **Step 5** — follow-up questions, including "Show me only base rules / only Usd Optimize rules" and the "How do I fix `<RuleName>`?" answer flow.
@@ -90,75 +87,19 @@ saved artifact:
 |---|---|
 | `<path/to/asset.usd>` | Asset mode. Looks up saved artifacts for this asset. |
 | `<path/to/issues.csv>` | Direct CSV mode. |
-| `<path/to/results.json>` | JSON mode. Prefer sibling `issues.csv`: when present, run Step 3 on the CSV. When the CSV sibling is missing (or unreadable), use **partial-report derivation** below if `findings` is populated. |
+| `<path/to/results.json>` | JSON mode (`--json-output`). Pass it to `summarize_csv.py` exactly like a CSV — see below. |
 
-### Partial-report summary mode (missing `issues.csv`)
+### CSV or JSON — both work
 
-The CSV carries base + Usd Optimize rows and is the authoritative source when
-present. Sometimes only `summary.json` exists beside the artifact directory —
-for example standalone analysis-mode output from `run-validators`, or a
-driver-written summary augmented with serialized operation analysis payloads.
+The driver can emit either `--csv-output` (a CSV) or `--json-output` (a JSON
+whose per-issue rows live under `rules[].issues[]`). Both carry the same issues
+from **both** rule families, and `summarize_csv.py` reads either one — it picks
+the reader by file extension and emits the identical `totals` / `rules` /
+`failures` summary. So Step 3 and Step 4 are the same regardless of which the
+user has; there is no separate derivation path.
 
-Treat all of these as one **analysis-derived partial report** path — one set of
-rules for building Step 4. Do **not** fork separate presentation templates for
-envelope quirks; only fingerprinting differs.
-
-#### When partial-report derivation applies
-
-- **Triggered by:** summary mode (`<path/to/summary.json>`) **and**
-  sibling `issues.csv` absent or unreadable.
-- **Prerequisite:** the JSON exposes a non-empty mapping at top-level `findings`
-  with per-operation payloads shaped like `{…, "output": {"analysis": {…}}}`
-  beneath each `findings[<operation_key>]`. If the trigger fires but there is no
-  usable `findings`, Step 4 cannot reconstruct failure groups — explain that the
-  artifact lacks row-level CSV **and** analysis payloads and ask the user to
-  re-run `run-validators` (Kit path) rather than improvising totals from bare
-  `total`/`by_rule` alone.
-
-#### Fingerprint envelopes (shared downstream)
-
-Use this only for logging/context; both feed the **same derivation** afterwards.
-
-**Envelope A — Standalone analysis-mode (`run-validators` Python/API fallback):**
-
-- Identified by `validator_path`, typically `"standalone-analysis-mode"`,
-  alongside top-level `findings`. This artifact usually omits timing fields.
-
-#### Shared derivation (`findings` → Step 4)
-
-For this envelope, perform:
-
-1. For each `<operation_key>` in `findings`, read **`findings[op].output.analysis`**
-   and map emitted rule-like entries onto the summarizer-aligned columns using
-   the operation's analysis output as the schema reference (the operation is
-   documented in `docs/operations/<key>.rst`; same field paths as standalone —
-   do not diverge logic per envelope).
-
-2. Render **Step 4** — header + summary table + failure details — in the normal
-   format (`family`, severity columns, expandable failure blocks). Omit rules with
-   zero issues as usual once derived.
-
-4. **`Fix tier` / `Operation`:** leave **`Fix tier` blank** and use `—` / `?` per
-   Step 4 rules when **no Rule reference mapping** exists (same allowance as CSV
-   path).
-
-5. **Headline takeaway:** must include **exactly** this line verbatim (characters
-   and hyphen length as shown):
-
-   > `(standalone fallback — base usd_validation_nvidia rules not covered)`
-
-   — when CSV-derived detail is unavailable, because row-level/base rule
-   coverage depends on CSV + full usd-validation-nvidia emission and this
-   branch does not recreate base plugin issues.
-
-Adapt the Step 4 **Header** source line when CSV is absent (e.g. cite
-`summary.json` / artifact dir replay instead of CSV path).
-
-#### When sibling `issues.csv` exists
-
-Prefer **Step 3** (`summarize_csv.py` / ephemeral **temporary stdlib-only fallback
-summarizer** beside the CSV) and ordinary Step 4 — do not substitute
-`findings`-only interpretation when the CSV is present.
+Prefer the CSV when both exist, purely because it is the format the rest of this
+skill's examples use.
 
 Follow-up questions (no re-run needed):
 
@@ -177,13 +118,9 @@ Determine what kind of path the user gave:
 
 - Ends in `.usd` / `.usda` / `.usdc` / `.usdz` → asset mode (Step 2).
 - Ends in `.csv` → direct CSV mode (jump to Step 3 with the user's CSV).
-- Ends in `.json` → summary mode. Read the JSON; look for sibling
-  `issues.csv` **in the same directory**. When the CSV exists, continue with
-  Step 3 using that CSV. When the sibling CSV is **missing**, follow **§
-  Partial-report summary mode (missing `issues.csv`)** in Usage above:
-  fingerprint standalone vs Kit envelopes, require `findings`, then skip CSV
-  summarization and synthesize Step 4 from `findings[op].output.analysis` instead
-  of dumping raw summaries.
+- Ends in `.json` → JSON mode. Prefer a sibling `issues.csv` **in the same
+  directory** if one exists, purely for consistency with the examples here;
+  otherwise jump to Step 3 with the JSON itself. The summarizer handles both.
 
 If no path is given, ask which asset / artifact to interpret.
 
@@ -221,17 +158,12 @@ When used, it returns the same JSON shape on all OSes. Parse the `state` field:
   the `run-validators` skill (don't run it inline without confirmation,
   since validation can take minutes on large assets).
 
-## Step 3 — Summarize the CSV
+## Step 3 — Summarize the report
 
-**Bypass:** When **§ Partial-report summary mode (missing `issues.csv`)** in
-Usage applies — sibling CSV absent but `findings` contains operation analysis
-bundles (`findings[<op>].output.analysis`) — skip CSV summarization here.
-Instead project those analysis objects into the same compact `totals` /
-`rules` / `failures` intermediate representation Step 4 expects (mirror the cap
-spirit of `--max-failures-per-rule 10`; do not replay thousands of primitives),
-then proceed directly to Step 4 using the unified partial-report playbook.
+Pass either the CSV or the JSON — `summarize_csv.py` picks the reader by
+extension and emits the same summary from both.
 
-**Don't read the CSV into context directly.** A real validator output is
+**Don't read the report into context directly.** A real validator output is
 thousands of rows and pulling it inline wastes tokens and is fragile across
 quoting / encoding edge cases. Prefer the packaged summarizer when it is
 present, then parse its compact JSON. **For the initial report, always pass
@@ -306,8 +238,8 @@ packaged `summarize_csv.py` does not emit them by default.
 
 Notes on what the summarizer does for you:
 
-- **Severity casing** — already lowercased (CSV uses title case `Warning`/`Failure`,
-  `summary.json` uses upper case `WARNING`/`FAILED_CHECK`; the summarizer
+- **Severity casing** — already lowercased (the CSV uses title case
+  `Warning`/`Failure`, the JSON upper case `WARNING`/`FAILURE`; the summarizer
   collapses both to lowercase keys: `warning`, `failure`, `error`, `info`).
 - **Family classification** — `family` is `"Usd Optimize"` for `UsdOptimize*` rules
   and `"base"` for everything else.
@@ -334,18 +266,13 @@ abbreviate to single letters in user-facing output.
 
 ```
 File: <asset (basename)>
-Source: replayed from <csv_path> (saved <csv_mtime>)        # or "fresh run"
-Validate time: X.Xs (open Y.Ys)                             # if summary.json present
+Source: replayed from <report_path> (saved <mtime>)         # or "fresh run"
 
 Summary: <N> failures, <N> warnings, <N> errors across <N> rules
          (base: <count>, UsdOptimize: <count>)
 ```
 
-**Partial-report / missing CSV:** omit the CSV replay line unless a CSV existed;
-instead use `Source:` text that cites `summary.json` / artifact-directory replay
-(or `asset.txt`), e.g. *analysis-derived from `<summary.json>` (sibling CSV
-missing; `findings[op].output.analysis` payload)* — keep timing lines when the
-summary envelope exposes `validate_secs` / `open_secs` (Envelope B).
+Cite whichever report you summarized — `issues.csv` or `results.json`.
 
 ### Summary table
 
@@ -479,9 +406,9 @@ commands.
 
 | Symptom | Response |
 |---|---|
-| Summary JSON without sibling CSV **and** no usable top-level `findings` payloads | Artifact has rollups only (`total` / `by_rule`) — cannot rebuild Step 4 failure groups or prim lists. Ask the user to re-run `run-validators` (emit `issues.csv` or a summary that embeds `findings[<op>].output.analysis`). |
+| `summarize_csv.py` reports `not a usd-validation-nvidia report` | The JSON isn't a `--json-output` report (wrong file, or produced by an engine older than 1.21.0). Ask the user to re-run `run-validators` with `--csv-output` or `--json-output`. |
 | User passes an asset with no saved run | "No saved validation found at `<artifact_dir>`. Run the run-validators skill on this asset first." |
-| `summarize_csv.py` reports `csv not found` | The artifact dir is empty or the path is wrong. Re-run the run-validators skill, or check `<artifact_dir>/` contents. |
+| `summarize_csv.py` reports `report not found` | The artifact dir is empty or the path is wrong. Re-run the run-validators skill, or check `<artifact_dir>/` contents. |
 | `summarize_csv.py` reports `CSV missing required columns` | The file is from a different tool. Show the first 10 lines and ask the user to confirm. |
 | Summarizer succeeds but `totals.rows == 0` | "The validation completed with no issues — the asset passed every rule that ran." |
 | User asks about a rule not in the summarizer output | "No issues were emitted for `<RuleName>` in this run." |
@@ -514,9 +441,8 @@ Usd Optimize-only filters) from the parsed JSON in context.
 - It never executes fix operations. Fix commands are *recommended* via
   the Rule reference table; the user invokes `run-operations` to apply
   them.
-- The CSV is the source of truth — `summary.json`'s `total` /
-  `by_rule` are filtered to Usd Optimize rules only. The skill always derives
-  totals from the summarizer's `totals` section.
+- Always derive totals from the summarizer's `totals` section rather than from
+  counts printed elsewhere in the driver's output.
 - The initial report caps each rule at 10 failure rows
   (`--max-failures-per-rule 10`) to keep context manageable. The
   "show all <Rule>" follow-up re-runs uncapped.

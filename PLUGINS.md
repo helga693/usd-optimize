@@ -71,9 +71,11 @@ OperationResult MyPlugin::executeImpl()
         ...
     }
 
-    return OperationResult::eSuccess;
+    return { true };
 }
 ```
+
+`OperationResult` is a struct, not an enum (see `usd_optimize/core/Defs.h`): `{ true }` reports success, and `{ false, getCStr(error) }` reports a failure with a message.
 
 The `getDisplayGroup()` function determines which submenu your operation appears under in the Usd Optimize UI. The available constants are `s_displayGroupGeometry`, `s_displayGroupMaterials`, `s_displayGroupStage`, and `s_displayGroupUtilities`. If not overridden, the operation will appear at the top level of the menu.
 
@@ -284,4 +286,4 @@ If you maintain any other state on your plugin class then you can tidy this up a
 
 ## Documenting Plugins
 
-A description of the plugin and its arguments should be added to `operations.rst`. Usually a screenshot is also included. On Linux, you can use `./tools/capture.py` to help grab one (see the script itself for usage).
+Override `getDocumentation()` to return reStructuredText describing what the operation does and how to tune it. The per-operation page `docs/operations/<key>.rst` and the `docs/operations.rst` catalog are generated from that string plus your `addArgument()` declarations, by running `./repo.sh docs_gen --autogen_only` (`repo.bat` on Windows). Do not hand-edit the generated `.rst` files; they are marked AUTO GENERATED and your changes will be overwritten.

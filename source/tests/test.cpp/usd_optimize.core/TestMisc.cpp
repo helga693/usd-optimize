@@ -1166,6 +1166,11 @@ TEST_CASE("Test CUDA availability from multiple threads")
     // (shares the same cached result via the core plugin)
     bool mainExecutableCudaAvailable = isCudaAvailable();
 
+    if (std::getenv("USD_OPTIMIZE_TEST_EXPECT_CUDA"))
+    {
+        CHECK(mainExecutableCudaAvailable);
+    }
+
     // All threads should get the same result (either all true or all false)
     bool firstResult = results[0];
     bool allConsistent = true;

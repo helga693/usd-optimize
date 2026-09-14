@@ -33,7 +33,7 @@ tool. Other agents read `.agents/skills/<name>/SKILL.md` and follow it directly.
 | [`build`](build/SKILL.md) | Building Usd Optimize from source via `repo.sh`. Required before running validators / operations against a dev tree. |
 | [`prebuilt-package`](prebuilt-package/SKILL.md) | Installing a published binary drop (no source, no `repo.sh`). |
 | [`testing`](testing/SKILL.md) | Running the `cpp` / `python` test suites. |
-| [`run-validators`](run-validators/SKILL.md) | Validating a USD asset (read-only by default); pass `--fix` to auto-apply fixable issues in place (on a copy if you want to keep the original). Drives `tools/validators/run.{sh,bat}`, writes a per-issue CSV. Also covers the auto-fix model, programmatic API, `nvidia_usd_validate` CLI, and adding new validators. |
+| [`run-validators`](run-validators/SKILL.md) | Validating a USD asset (read-only by default); pass `--fix` to auto-apply fixable issues — non-destructive, writes a new file (`--fix-in-place` to overwrite the source). Drives `tools/validators/run.{sh,bat}`, writes a per-issue CSV. Also covers the auto-fix model, programmatic API, `nvidia_usd_validate` CLI, and adding new validators. |
 | [`interpret-validators`](interpret-validators/SKILL.md) | Triaging the issues `--fix` could **not** auto-resolve. Tier-classifies the remaining rules, lists affected prims, and recommends the operation + parameters that need a user decision. |
 | [`config-presets`](config-presets/SKILL.md) | Choosing and running a ready-made preset operation stack from `config_presets/`. Use when you want a known-good starting point for a common optimization goal. |
 | [`run-operations`](run-operations/SKILL.md) | Running operations on a USD asset with the `usdOptimize` CLI — inline ops, a preset config, or a custom JSON config. Closes the loop after `interpret-validators` flags a manual fix. |
@@ -50,16 +50,15 @@ tool. Other agents read `.agents/skills/<name>/SKILL.md` and follow it directly.
 ## End-to-end optimization loop
 
 The validator / operation skills compose. Validation is read-only; `--fix` is
-opt-in and applies **in place**. This loop `--fix`es a **copy** so the original
-`<asset>` stays intact for the before/after diff — fix `<asset>` directly if you
-don't need it preserved:
+opt-in and non-destructive — it writes fixes to a new file by default, so the
+original `<asset>` stays intact for the before/after diff:
 
 ```
 /inspect-asset <asset>                          — quick stage overview (optional)
    ↓
 /run-validators <asset>                         — validate (read-only); writes a per-issue CSV
-   ↓ opt into --fix to repair (modifies the target IN PLACE):
-   ↓   cp <asset> <fixed.usd>  →  /run-validators <fixed.usd> --fix   (copy keeps <asset> for the diff)
+   ↓ opt into --fix to repair (writes a NEW file; source kept):
+   ↓   /run-validators <asset> --fix --fix-output <fixed.usd>   (--fix-in-place overwrites <asset>)
 /interpret-validators <fixed.usd>               — triage ONLY the issues --fix could not resolve
    ↓ for each: the op + parameters that need a user decision
 /run-operations <fixed.usd> -c config_presets/<name>.json   (or a custom JSON config / inline -o)
@@ -106,7 +105,8 @@ For the CLI flags, see `docs/cli.rst`. For preset stacks, see
   what the docs say, change the operation source and regenerate
   (`./repo.sh docs_gen --autogen_only`).
 - **Repair is opt-in.** `run-validators` is read-only by default; add `--fix`
-  when repairs are requested — it fixes in place (on a copy if the original must
-  be kept). The manual skills handle only what needs a human decision.
+  when repairs are requested — it's non-destructive, writing a new file by
+  default (`--fix-in-place` to overwrite the source). The manual skills handle
+  only what needs a human decision.
 - **Skills cite each other deliberately.** When one skill points at another (or
   at a `docs/` reference), that's because the canonical answer lives there.

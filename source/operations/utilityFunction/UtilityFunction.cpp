@@ -33,7 +33,7 @@ constexpr const char* s_category = "UTILITY_FUNCTION";
 UtilityFunctionOperation::UtilityFunctionOperation()
     : Operation("utilityFunction",
                 "Utility Function",
-                "Helper functions to pre-process components for scene optimizer operations..")
+                "Helper functions to pre-process components for Usd Optimize operations.")
 {
 
     // Prim Paths

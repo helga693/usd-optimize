@@ -1,10 +1,10 @@
 ---
 name: build
 description: Build Usd Optimize from source via repo.sh (Linux) or repo.bat (Windows). Use when compiling the repo, switching configs, or selecting a USD flavor.
-version: "1.0.0"
 allowed-tools: Shell
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [build, source, compile, repo]
 ---
 
@@ -26,7 +26,7 @@ Search this doc for keywords like `MSVC`, `gcc`, `Packman`, `repo.sh`, `repo.bat
 - **Build Options** — `--config`, `--rebuild`, `--enable-gcov`, USD-flavor selection.
 - **Build Output** — `_build/<platform>/<config>/` layout.
 - **USD Flavor Tokens** — selecting which USD bundle to build against.
-- **Formatting Check** — `./repo.sh ci format`.
+- **Formatting Check** — `./repo.sh format` / `repo.bat format`.
 
 Companion skills: `prebuilt-package` (use a binary drop instead), `testing` (run tests against a built tree).
 
@@ -116,8 +116,8 @@ Supported flavors and versions are listed in `deps/usd_flavors.json`.
 ## Formatting Check
 
 ```bash
-./repo.sh ci format
-repo.bat ci format
+./repo.sh format
+repo.bat format
 ```
 
 ## Purpose

@@ -144,11 +144,20 @@ class Test_Operation_DecimateMeshes(Test_Operation):
                 pass
         return self._compare_decimate_usdc_stages(golden_file_path, result_file_path)
 
+    def _usda_content_matches(self, golden_file_path, result_file_path):
+        """Byte-compare two .usda files, ignoring CRLF vs LF line endings."""
+
+        def read_lf(path):
+            with open(path, "rb") as f:
+                return f.read().replace(b"\r\n", b"\n")
+
+        return read_lf(golden_file_path) == read_lf(result_file_path)
+
     def compare_files(self, golden_file_path, result_file_path):
         if golden_file_path.endswith(".usdc") and result_file_path.endswith(".usdc"):
             result = self._compare_usdc_files(golden_file_path, result_file_path)
         else:
-            result = filecmp.cmp(golden_file_path, result_file_path, False)
+            result = self._usda_content_matches(golden_file_path, result_file_path)
         if result:
             return result
 

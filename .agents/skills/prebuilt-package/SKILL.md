@@ -1,10 +1,10 @@
 ---
 name: prebuilt-package
 description: Install and verify a prebuilt Usd Optimize package (no source build, no repo.sh). Use for binary-drop deployments.
-version: "1.0.0"
 allowed-tools: Shell
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [install, deployment, package]
 ---
 

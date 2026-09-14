@@ -1,10 +1,10 @@
 ---
 name: create-proxy
 description: Create a USD proxy mesh sibling. Use to generate decimated, bbox, or LOD stand-ins, with optional render/proxy purpose variant set.
-version: "1.0.0"
 allowed-tools: Read, Write, Bash
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [usd, proxy, lod, decimation]
 ---
 

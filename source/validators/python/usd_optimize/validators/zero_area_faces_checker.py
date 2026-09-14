@@ -16,11 +16,28 @@ from .base_usd_optimize_checker import BaseUsdOptimizeChecker
 class ZeroAreaFacesChecker(BaseUsdOptimizeChecker):
     """
     Check mesh prims for any zero area faces, returns all prims that have zero
-    area faces as single warning with an option to fix using the scene optimizer
+    area faces as a single warning with an option to fix using a Usd Optimize
     operation.
     """
 
     OPERATION_NAME: str = "meshCleanup"
+
+    # omo::Defect::DegenerateFaces is topological ("fewer than 3 distinct vertex references"), and
+    # checkClean validates each defect against the progressively fixed mesh, so zero-area faces are
+    # only counted once mergeVertices+mergeNeighbors has collapsed their coincident points.
+    # contractDegenerateEdges must stay False: paired with the merge it corrupts the heap in
+    # omo::checkClean. Dropping only that half keeps the detection and clears the crash.
+    OPERATION_ARGS = {
+        "mergeVertices": True,
+        "tolerance": 0.0,
+        "contractDegenerateEdges": False,
+        "removeDegenerateFaces": True,
+        "makeManifold": False,
+        "removeIsolatedVertices": False,
+        "mergeBoundaries": False,
+        "mergeNeighbors": True,
+        "removeDuplicateFaces": False,
+    }
 
     @classmethod
     def _mesh_remove_zero_area_faces(cls, usdStage: Usd.Stage, prim: Usd.Prim) -> None:

@@ -14,11 +14,19 @@ from pxr import Usd
 from usd_optimize.core import analysis
 from usd_validation_nvidia import BaseRuleChecker, ParameterType, ValidationEngine
 
+try:
+    from usd_validation_nvidia import multiprocess_safe
+except ImportError:
+
+    def multiprocess_safe(method):  # no-op fallback; leaves the method unmarked
+        return method
+
+
 logger = logging.getLogger(__name__)
 
 # Environment variable that seeds the default verbose state at import time.
 # Accepted truthy values are case-insensitive ``1``/``true``/``yes``/``on``.
-# The perf_validators ``--verbose`` flag and :func:`set_verbose` both override
+# The validators driver ``--verbose`` flag and :func:`set_verbose` both override
 # whatever this resolves to.
 _VERBOSE_ENV_VAR = "USD_OPTIMIZE_VALIDATOR_VERBOSE"
 
@@ -139,7 +147,7 @@ class BaseUsdOptimizeChecker(BaseRuleChecker):
 
     # When True, checkers that report an aggregate count also emit one issue per
     # failing prim so the prim paths land in the issue Location (and CSV).
-    # Toggle via :func:`set_verbose`, the perf_validators ``--verbose`` flag, or
+    # Toggle via :func:`set_verbose`, the validators driver ``--verbose`` flag, or
     # the ``USD_OPTIMIZE_VALIDATOR_VERBOSE`` env var. Seeded from the env at
     # import; left as a plain class attribute so tests can flip it directly.
     VERBOSE: ClassVar[bool] = _env_verbose_default()
@@ -378,6 +386,9 @@ class BaseUsdOptimizeChecker(BaseRuleChecker):
         """
         pass
 
+    # The single line that makes every rule poolable -- the engine pools only marked
+    # tasks, and no subclass overrides CheckStage.
+    @multiprocess_safe
     def CheckStage(self, usdStage: Usd.Stage):
         """Base setup/execution of analysis mode for a usd optimize operation"""
         analysis_result = None

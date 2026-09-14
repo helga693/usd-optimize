@@ -3,43 +3,55 @@
 #
 
 from functools import partial
-from typing import List
+from typing import ClassVar, List, Mapping
 
 from pxr import Usd
 from usd_optimize.core import analysis
 from usd_validation_nvidia import Suggestion, capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.GeometryRequirements.VG_017)
 class PrimitiveFitChecker(BaseUsdOptimizeChecker):
     """
-    Check mesh prims that could be replaced with a USD primitive prim, with an option to apply the fix from scene optimizer operation.
+    Check mesh prims that could be replaced with a USD primitive prim, with an option to apply the fix from a Usd Optimize operation.
     """
 
     OPERATION_NAME: str = "fitPrimitives"
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {
+        "GPU_FACE_COUNT_THRESHOLD": ParameterFromOpArg("gpuFaceCountThreshold"),
+        "VERTEX_TOLERANCE": ParameterFromOpArg("vertexTolerance"),
+        "VOLUME_TOLERANCE": ParameterFromOpArg("volumeTolerance"),
+        "IGNORE_SUBSETS": ParameterFromOpArg("ignoreSubsets"),
+        "ALLOW_NEGATIVE_VOLUME": ParameterFromOpArg("allowNegativeVolume"),
+        "ALLOW_MISSING_ENDCAPS": ParameterFromOpArg("allowMissingEndcaps"),
+    }
 
-    @classmethod
-    def _fit_primitives(cls, prim_name, ignore_nonconst_primvars, usdStage: Usd.Stage, prim: Usd.Prim) -> None:
+    def _fit_primitives(self, prim_name, ignore_nonconst_primvars, usdStage: Usd.Stage, prim: Usd.Prim) -> None:
         """
         Replace meshes with fit primitives using Usd Optimize
         """
 
+        # Start from the effective args so the tuned tolerance/threshold parameters
+        # (vertexTolerance, volumeTolerance, gpuFaceCountThreshold, ignoreSubsets,
+        # allowNegativeVolume, allowMissingEndcaps) drive the fix the same way they
+        # drive analysis, then set the per-suggestion fit target and primvar handling.
         # Configure optimize primvars with this specific prim path and primvar name.
         # TODO: It would be nice to be able to bulk apply these. If not, we can at
         #       least add a mode to Usd Optimize to target a specific attribute path
+        args = dict(self._effective_args())
+        args.update(
+            {
+                "fitSphere": (prim_name == "sphere"),
+                "fitCylinder": (prim_name == "cylinder"),
+                "fitCone": (prim_name == "cone"),
+                "fitCube": (prim_name == "cube"),
+                "ignoreNonConstPrimvars": ignore_nonconst_primvars,
+            }
+        )
         operations: List[analysis.OperationConfig] = [
-            analysis.OperationConfig(
-                cls.OPERATION_NAME,
-                args={
-                    "fitSphere": (prim_name == "sphere"),
-                    "fitCylinder": (prim_name == "cylinder"),
-                    "fitCone": (prim_name == "cone"),
-                    "fitCube": (prim_name == "cube"),
-                    "ignoreNonConstPrimvars": ignore_nonconst_primvars,
-                },
-            ),
+            analysis.OperationConfig(self.OPERATION_NAME, args=args),
         ]
 
         # Execute the optimization via Usd Optimize.
@@ -78,7 +90,7 @@ class PrimitiveFitChecker(BaseUsdOptimizeChecker):
                     message=text,
                     at=usdStage.GetPrimAtPath("/"),
                     suggestion=Suggestion(
-                        message="Use the scene optimizer operation Fit Primitives with fit {} enabled.".format(name),
+                        message="Use the Usd Optimize operation Fit Primitives with fit {} enabled.".format(name),
                         callable=partial(self._fit_primitives, name, False),
                     ),
                 )
@@ -103,7 +115,7 @@ class PrimitiveFitChecker(BaseUsdOptimizeChecker):
                     message=text,
                     at=usdStage.GetPrimAtPath("/"),
                     suggestion=Suggestion(
-                        message="If losing surface-varying features is acceptable, use the scene optimizer operation "
+                        message="If losing surface-varying features is acceptable, use the Usd Optimize operation "
                         'Fit Primitives with both fit {} and "Ignore non-const primvars" enabled.'.format(name),
                         callable=partial(self._fit_primitives, name, True),
                     ),

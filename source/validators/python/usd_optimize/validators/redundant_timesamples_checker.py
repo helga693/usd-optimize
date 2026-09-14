@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-from typing import List
+from typing import ClassVar, List, Mapping
 
 from pxr import Usd
 from usd_optimize.core import analysis
 from usd_validation_nvidia import Suggestion, capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.GeometryRequirements.VG_015)
@@ -18,14 +18,22 @@ class RedundantTimeSamplesChecker(BaseUsdOptimizeChecker):
     """
 
     OPERATION_NAME: str = "optimizeTimeSamples"
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {
+        "EPSILON_DOUBLE": ParameterFromOpArg("epsilonD"),
+        "EPSILON_FLOAT": ParameterFromOpArg("epsilonF"),
+    }
 
-    @classmethod
-    def _remove_redundant_timesamples(cls, usdStage: Usd.Stage, attr: Usd.Attribute):
+    def _remove_redundant_timesamples(self, usdStage: Usd.Stage, attr: Usd.Attribute):
         """Use Usd Optimize to fix the specified attribute"""
+
+        # Honor the tuned EPSILON parameters so the fix removes the same samples the
+        # analysis pass flagged as redundant.
+        args = self._effective_args()
+        args["attributePaths"] = [str(attr.GetPath())]
 
         # Configure operation
         operations: List[analysis.OperationConfig] = [
-            analysis.OperationConfig(cls.OPERATION_NAME, args={"attributePaths": [str(attr.GetPath())]}),
+            analysis.OperationConfig(self.OPERATION_NAME, args=args),
         ]
 
         # Execute the optimization via Usd Optimize.

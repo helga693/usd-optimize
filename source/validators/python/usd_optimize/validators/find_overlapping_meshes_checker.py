@@ -44,7 +44,11 @@ class FindOverlappingMeshesChecker(BaseUsdOptimizeChecker):
         if len(overlapping_meshes) == 0:
             return
 
-        all_prims = [usdStage.GetPrimAtPath(path) for path in overlapping_meshes]
+        # Workaround for usd-validation-nvidia 1.21.0, whose CLI renders `at` only as
+        # a tuple and raises on the list its own _AddWarning documents, losing the
+        # whole run. Drop the tuple once the floor moves to 1.22.0, which carries the
+        # upstream fix.
+        all_prims = tuple(usdStage.GetPrimAtPath(path) for path in overlapping_meshes)
 
         self._AddWarning(
             message=f"Found {len(overlapping_meshes)} overlapping meshes in the stage.",

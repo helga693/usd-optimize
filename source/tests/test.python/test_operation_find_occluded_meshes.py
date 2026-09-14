@@ -252,9 +252,10 @@ class Test_Operation_FindOccludedMeshes(Test_Operation):
         if failures:
             self.fail("Failures:\n" + "\n".join(failures))
 
-    async def test_zero_extent_mesh_skipped(self):
-        """Test that a zero-extent (all points coincident) mesh isolated from other geometry does not
-        crash the clustered CPU path: it is skipped and genuine occlusion is still found.
+    async def test_zero_extent_mesh_no_crash(self):
+        """Regression: degenerate (zero-extent) meshes must not crash clustered CPU visibility checks.
+
+        mesh_tools_lib handles such input internally; genuine occlusion results must still be found.
         """
 
         stage = self._open_stage("zeroExtentMesh.usda")
@@ -271,7 +272,8 @@ class Test_Operation_FindOccludedMeshes(Test_Operation):
         self.assertTrue("analysis" in result[2])
         analysis = result[2]["analysis"]
 
-        # The genuinely enclosed mesh is found; the degenerate mesh is skipped, not flagged
+        # The genuinely enclosed mesh is found; the degenerate mesh is handled by mesh_tools
+        # internally and is not flagged as occluded.
         self.assertTrue("occludedMeshes" in analysis)
         self.assertEqual(analysis["occludedMeshes"], ["/root/hidden/hidden"])
 

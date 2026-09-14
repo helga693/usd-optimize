@@ -7,11 +7,17 @@ import logging
 
 from pxr import Gf, Usd, UsdGeom
 
-from .test_utils import Test_Operation, _get_meshes
+from .test_utils import Test_Operation, _get_context, _get_meshes
 
 logger = logging.getLogger(__name__)
 
 _KEY_PATHS = "paths"
+_KEY_INPUT_MODE = "inputMode"
+_KEY_START_TIME = "startTime"
+_KEY_END_TIME = "endTime"
+_KEY_TIME_STEP = "timeStep"
+_KEY_CONNECT_TIME_SAMPLES = "connectTimeSamples"
+_KEY_OUTPUT_PATH = "outputPath"
 _KEY_DIM = "dim"
 _KEY_VOXEL_SIZE = "voxelSize"
 _KEY_ERODE = "erode"
@@ -21,6 +27,10 @@ _KEY_EXTRACT_LOD_PYRAMID = "extractLodPyramid"
 
 DEFAULT_ARGS = {
     _KEY_PATHS: [],
+    _KEY_INPUT_MODE: 0,
+    _KEY_TIME_STEP: 1.0,
+    _KEY_CONNECT_TIME_SAMPLES: True,
+    _KEY_OUTPUT_PATH: "",
     _KEY_DIM: 512,
     _KEY_VOXEL_SIZE: 0.0,
     _KEY_ERODE: 8.0,
@@ -28,6 +38,83 @@ DEFAULT_ARGS = {
     _KEY_ADAPTIVITY: 0.0,
     _KEY_EXTRACT_LOD_PYRAMID: False,
 }
+
+
+_CUBE_POINTS = [
+    Gf.Vec3f(-1, -1, -1),
+    Gf.Vec3f(1, -1, -1),
+    Gf.Vec3f(-1, 1, -1),
+    Gf.Vec3f(1, 1, -1),
+    Gf.Vec3f(-1, -1, 1),
+    Gf.Vec3f(1, -1, 1),
+    Gf.Vec3f(-1, 1, 1),
+    Gf.Vec3f(1, 1, 1),
+]
+_CUBE_FACE_COUNTS = [4, 4, 4, 4, 4, 4]
+_CUBE_FACE_INDICES = [
+    0,
+    1,
+    3,
+    2,
+    4,
+    6,
+    7,
+    5,
+    0,
+    4,
+    5,
+    1,
+    2,
+    3,
+    7,
+    6,
+    0,
+    2,
+    6,
+    4,
+    1,
+    5,
+    7,
+    3,
+]
+
+
+def _translated_points(x):
+    return [Gf.Vec3f(point[0] + x, point[1], point[2]) for point in _CUBE_POINTS]
+
+
+def _define_cube(stage, path, x=0.0):
+    mesh = UsdGeom.Mesh.Define(stage, path)
+    mesh.GetPointsAttr().Set(_translated_points(x))
+    mesh.GetFaceVertexCountsAttr().Set(_CUBE_FACE_COUNTS)
+    mesh.GetFaceVertexIndicesAttr().Set(_CUBE_FACE_INDICES)
+    mesh.GetSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+    return mesh
+
+
+def _world_range(stage, prim_path, time):
+    cache = UsdGeom.BBoxCache(Usd.TimeCode(time), [UsdGeom.Tokens.default_])
+    return cache.ComputeWorldBound(stage.GetPrimAtPath(prim_path)).ComputeAlignedRange()
+
+
+def _temporal_args(output_path, paths, start=1.0, end=3.0, step=1.0):
+    args = DEFAULT_ARGS.copy()
+    args.update(
+        {
+            _KEY_PATHS: paths,
+            _KEY_INPUT_MODE: 1,
+            _KEY_TIME_STEP: step,
+            _KEY_OUTPUT_PATH: output_path,
+            _KEY_DIM: 128,
+            _KEY_VOXEL_SIZE: 0.25,
+            _KEY_ERODE: 0.0,
+        }
+    )
+    if start is not None:
+        args[_KEY_START_TIME] = start
+    if end is not None:
+        args[_KEY_END_TIME] = end
+    return args
 
 
 class Test_Operation_Shrinkwrap(Test_Operation):
@@ -49,6 +136,11 @@ class Test_Operation_Shrinkwrap(Test_Operation):
         face_vertex_counts = mesh.GetFaceVertexCountsAttr().Get()
         self.assertIsNotNone(face_vertex_counts, f"Mesh at {prim_path} has no face vertex counts")
         self.assertGreater(len(face_vertex_counts), 0, f"Mesh at {prim_path} has zero faces")
+
+        face_vertex_indices = mesh.GetFaceVertexIndicesAttr().Get()
+        self.assertIsNotNone(face_vertex_indices, f"Mesh at {prim_path} has no face vertex indices")
+        self.assertEqual(sum(face_vertex_counts), len(face_vertex_indices))
+        self.assertTrue(all(0 <= index < len(points) for index in face_vertex_indices))
 
         return mesh
 
@@ -308,6 +400,186 @@ class Test_Operation_Shrinkwrap(Test_Operation):
             f"{expected_center} (tolerance {tolerance}). "
             f"Shrinkwrap may not be accounting for world-space transforms.",
         )
+
+    async def test_temporal_combined_samples_midpoint_and_step(self):
+        """Temporal mode includes intermediate motion and honors the configured step."""
+        stage = Usd.Stage.CreateInMemory()
+        stage.SetStartTimeCode(1)
+        stage.SetEndTimeCode(3)
+        mesh = _define_cube(stage, "/World/Cube")
+        translate = UsdGeom.Xformable(mesh).AddTranslateOp()
+        translate.Set(Gf.Vec3d(-4, 0, 0), 1)
+        translate.Set(Gf.Vec3d(6, 0, 0), 2)
+        translate.Set(Gf.Vec3d(-4, 0, 0), 3)
+
+        success, result = self._execute_command(_temporal_args("/SweepAll", ["/World/Cube"]), _get_context(stage))
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+        self._assert_valid_shrinkwrap_mesh(stage, "/SweepAll")
+        all_range = _world_range(stage, "/SweepAll", 1)
+        self.assertGreater(all_range.GetMax()[0], 5.0)
+        self.assertLess(all_range.GetMin()[0], -3.0)
+
+        success, result = self._execute_command(
+            {
+                **_temporal_args("/SweepEndpoints", ["/World/Cube"], step=2.0),
+                _KEY_CONNECT_TIME_SAMPLES: False,
+            },
+            _get_context(stage),
+        )
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+        endpoints_range = _world_range(stage, "/SweepEndpoints", 1)
+        self.assertLess(endpoints_range.GetMax()[0], 0.0)
+
+    async def test_temporal_combined_connects_adjacent_samples(self):
+        """Swept prisms fill motion between sparse, topology-compatible samples."""
+        stage = Usd.Stage.CreateInMemory()
+        stage.SetStartTimeCode(1)
+        stage.SetEndTimeCode(2)
+        mesh = _define_cube(stage, "/World/Cube")
+        translate = UsdGeom.Xformable(mesh).AddTranslateOp()
+        translate.Set(Gf.Vec3d(-8, 0, 0), 1)
+        translate.Set(Gf.Vec3d(8, 0, 0), 2)
+
+        sampled_args = _temporal_args("/SampledOnly", ["/World/Cube"], start=1, end=2, step=1)
+        sampled_args.update(
+            {
+                _KEY_CONNECT_TIME_SAMPLES: False,
+                _KEY_DIM: 256,
+                _KEY_VOXEL_SIZE: 0.2,
+                _KEY_ERODE: 8.0,
+            }
+        )
+        success, result = self._execute_command(sampled_args, _get_context(stage))
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+
+        swept_args = sampled_args.copy()
+        swept_args[_KEY_OUTPUT_PATH] = "/Swept"
+        swept_args[_KEY_CONNECT_TIME_SAMPLES] = True
+        success, result = self._execute_command(swept_args, _get_context(stage))
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+
+        sampled_points = UsdGeom.Mesh(stage.GetPrimAtPath("/SampledOnly")).GetPointsAttr().Get()
+        swept_points = UsdGeom.Mesh(stage.GetPrimAtPath("/Swept")).GetPointsAttr().Get()
+        sampled_center_points = sum(abs(point[0]) < 2.0 for point in sampled_points)
+        swept_center_points = sum(abs(point[0]) < 2.0 for point in swept_points)
+        self.assertEqual(sampled_center_points, 0)
+        self.assertGreater(swept_center_points, 0)
+
+    async def test_temporal_combined_aggregates_selected_meshes(self):
+        """Transform- and point-animated inputs combine while an unselected mesh stays excluded."""
+        stage = Usd.Stage.CreateInMemory()
+        stage.SetStartTimeCode(1)
+        stage.SetEndTimeCode(3)
+
+        transformed = _define_cube(stage, "/World/Transformed")
+        translate = UsdGeom.Xformable(transformed).AddTranslateOp()
+        translate.Set(Gf.Vec3d(-6, 0, 0), 1)
+        translate.Set(Gf.Vec3d(-3, 0, 0), 3)
+
+        points_animated = _define_cube(stage, "/World/PointsAnimated", 5)
+        points_animated.GetPointsAttr().Set(_translated_points(5), 1)
+        points_animated.GetPointsAttr().Set(_translated_points(9), 2)
+        points_animated.GetPointsAttr().Set(_translated_points(5), 3)
+        _define_cube(stage, "/World/UnselectedDecoy", 50)
+
+        success, result = self._execute_command(
+            _temporal_args("/CombinedSweep", ["/World/Transformed", "/World/PointsAnimated"]),
+            _get_context(stage),
+        )
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+        self._assert_valid_shrinkwrap_mesh(stage, "/CombinedSweep")
+
+        output_range = _world_range(stage, "/CombinedSweep", 1)
+        self.assertLess(output_range.GetMin()[0], -5.0)
+        self.assertGreater(output_range.GetMax()[0], 8.0)
+        self.assertLess(output_range.GetMax()[0], 40.0)
+        self.assertEqual(len(_get_meshes(stage)), 4)
+        self.assertTrue(stage.GetPrimAtPath("/World/Transformed"))
+        self.assertTrue(stage.GetPrimAtPath("/World/PointsAnimated"))
+
+    async def test_temporal_combined_output_is_world_static(self):
+        """The output has no time samples and resets inheritance beneath an animated parent."""
+        stage = Usd.Stage.CreateInMemory()
+        stage.SetStartTimeCode(1)
+        stage.SetEndTimeCode(3)
+        _define_cube(stage, "/Source")
+        parent = UsdGeom.Xform.Define(stage, "/AnimatedParent")
+        translate = parent.AddTranslateOp()
+        translate.Set(Gf.Vec3d(100, 0, 0), 1)
+        translate.Set(Gf.Vec3d(200, 0, 0), 3)
+
+        success, result = self._execute_command(
+            _temporal_args("/AnimatedParent/Sweep", ["/Source"]), _get_context(stage)
+        )
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+        output = stage.GetPrimAtPath("/AnimatedParent/Sweep")
+        self.assertTrue(output)
+        self.assertTrue(UsdGeom.Xformable(output).GetResetXformStack())
+        for attribute in output.GetAttributes():
+            self.assertEqual(attribute.GetTimeSamples(), [], f"{attribute.GetPath()} should be static")
+
+        range_at_1 = _world_range(stage, "/AnimatedParent/Sweep", 1)
+        range_at_3 = _world_range(stage, "/AnimatedParent/Sweep", 3)
+        self.assertTrue(Gf.IsClose(range_at_1.GetMin(), range_at_3.GetMin(), 1e-4))
+        self.assertTrue(Gf.IsClose(range_at_1.GetMax(), range_at_3.GetMax(), 1e-4))
+        self.assertLess(range_at_1.GetMax()[0], 10.0)
+
+    async def test_temporal_combined_uses_stage_range_and_includes_end(self):
+        """NaN defaults use stage metadata and include a non-divisible final endpoint."""
+        stage = Usd.Stage.CreateInMemory()
+        stage.SetStartTimeCode(2)
+        stage.SetEndTimeCode(5)
+        mesh = _define_cube(stage, "/Cube")
+        translate = UsdGeom.Xformable(mesh).AddTranslateOp()
+        translate.Set(Gf.Vec3d(0, 0, 0), 2)
+        translate.Set(Gf.Vec3d(10, 0, 0), 5)
+
+        args = _temporal_args("/StageRangeSweep", ["/Cube"], start=None, end=None, step=2.0)
+        success, result = self._execute_command(args, _get_context(stage))
+        self.assertTrue(success)
+        self.assertTrue(result[0], result[1])
+        self.assertGreater(_world_range(stage, "/StageRangeSweep", 2).GetMax()[0], 9.0)
+
+    async def test_temporal_combined_rejects_invalid_arguments(self):
+        stage = Usd.Stage.CreateInMemory()
+        _define_cube(stage, "/Cube")
+        cases = [
+            ("missing output", _temporal_args("", ["/Cube"])),
+            ("relative output", _temporal_args("Sweep", ["/Cube"])),
+            ("overlapping output", _temporal_args("/Cube/Sweep", ["/Cube"])),
+            ("reversed range", _temporal_args("/Sweep", ["/Cube"], start=3.0, end=1.0)),
+            ("zero step", _temporal_args("/Sweep", ["/Cube"], step=0.0)),
+        ]
+        lod_args = _temporal_args("/Sweep", ["/Cube"])
+        lod_args[_KEY_EXTRACT_LOD_PYRAMID] = True
+        cases.append(("LOD extraction", lod_args))
+
+        for name, args in cases:
+            with self.subTest(name=name):
+                success, result = self._execute_command(args, _get_context(stage))
+                self.assertTrue(success)
+                self.assertFalse(result[0])
+
+    async def test_temporal_combined_preserves_existing_output_prim(self):
+        stage = Usd.Stage.CreateInMemory()
+        _define_cube(stage, "/Cube")
+        existing_output = _define_cube(stage, "/ExistingOutput", x=20.0)
+        original_points = existing_output.GetPointsAttr().Get()
+
+        args = _temporal_args("/ExistingOutput", ["/Cube"])
+        success, result = self._execute_command(args, _get_context(stage))
+
+        self.assertTrue(success)
+        self.assertFalse(result[0])
+        preserved_output = UsdGeom.Mesh(stage.GetPrimAtPath("/ExistingOutput"))
+        self.assertTrue(preserved_output)
+        self.assertEqual(preserved_output.GetPointsAttr().Get(), original_points)
 
     async def test_shrinkwrap_skips_mesh_when_voxel_too_large(self):
         """Test that shrinkwrap gracefully skips meshes when the voxel size is

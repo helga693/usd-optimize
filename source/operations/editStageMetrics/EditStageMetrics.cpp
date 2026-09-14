@@ -11,6 +11,7 @@
 // USD
 #include <pxr/base/gf/rotation.h>
 #include <pxr/base/tf/patternMatcher.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/capsule.h>
 #include <pxr/usd/usdGeom/cone.h>
@@ -29,6 +30,7 @@
 #include <pxr/usd/usdPhysics/limitAPI.h>
 #include <pxr/usd/usdPhysics/massAPI.h>
 #include <pxr/usd/usdSkel/animation.h>
+#include <pxr/usd/usdSkel/root.h>
 
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -46,6 +48,9 @@ TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     ((xformOpTransform, "xformOp:transform"))
     ((xformOpRotateUpAxisCorrection, "xformOp:rotateX:upAxisCorrection"))
+    ((resetXformStack, "!resetXformStack!"))
+    ((xformOpScaleSkeletonCorrection, "xformOp:scale:skeletonMetricsCorrection"))
+    ((xformOpRotateSkeletonCorrection, "xformOp:rotateX:skeletonMetricsCorrection"))
     (Mesh)
     ((apiSchemas, "apiSchemas"))
     ((PhysicsLimitAPITransY, "PhysicsLimitAPI:transY"))
@@ -1684,6 +1689,141 @@ private:
 };
 
 
+/// Derived Transformer which operates on the root prim of a skeleton (``SkelRoot``). Rather than scaling/changing the
+/// basis of every prim in the skeleton hierarchy individually, this transformer adds a single scale and/or rotation
+/// xformOp to the skeleton root's xform. These ops are prepended to the xformOpOrder - since USD applies the ops in
+/// reverse list order, being first in the list makes them the outermost transforms - so the metrics correction is
+/// applied to the skeleton root's own transform and to the entire hierarchy below it at once. The prims within the
+/// skeleton hierarchy are left untouched.
+class SkeletonRootTransformer : public AttributeTransformer
+{
+public:
+    SkeletonRootTransformer(const SdfPath& primPath,
+                            const TfToken& scaleAttrName,
+                            const TfToken& rotateAttrName,
+                            const VtArray<TfToken>& xformOpOrder)
+        : AttributeTransformer(primPath)
+        , m_scaleAttrName(scaleAttrName)
+        , m_rotateAttrName(rotateAttrName)
+        , m_xformOpOrder(xformOpOrder)
+    {
+    }
+
+    ~SkeletonRootTransformer() override = default;
+
+    void transform(const SdfLayerHandle& layer, std::vector<std::string>& warnings) override
+    {
+        SdfPrimSpecHandle primSpec = layer->GetPrimAtPath(m_path);
+        if (!primSpec)
+        {
+            warnings.push_back(
+                "Failed to retrieve prim spec in active edit layer when applying skeleton root metrics correction: " +
+                m_path.GetAsString());
+            return;
+        }
+
+        // get the xformOp order - even though we were passed the xformOpOrder we need to attempt to retrieve it from
+        // the layer first in case an earlier transformer has added/modified it
+        SdfAttributeSpecHandle orderSpec = getOrCreateXformOpOrder(layer, primSpec, m_xformOpOrder);
+
+        // the correction ops, which the existing order is then appended to so that the corrections are the outermost
+        // transforms of the prim
+        VtArray<TfToken> newOrder;
+
+        // if the prim resets the xform stack that token must remain the first entry of the xformOpOrder - USD only
+        // honours it at index 0 and discards any ops that precede it, which would silently drop the correction
+        size_t existingIndex = 0;
+        if (!m_xformOpOrder.empty() && m_xformOpOrder[0] == _tokens->resetXformStack)
+        {
+            newOrder.push_back(_tokens->resetXformStack);
+            existingIndex = 1;
+        }
+
+        // add the scale correction op
+        if (m_doScale)
+        {
+            SdfAttributeSpecHandle scaleSpec =
+                SdfAttributeSpec::New(primSpec, m_scaleAttrName, SdfValueTypeNames->Double3, SdfVariabilityVarying);
+            scaleSpec->SetDefaultValue(VtValue(GfVec3d(m_scale, m_scale, m_scale)));
+            newOrder.push_back(m_scaleAttrName);
+        }
+
+        // add the up axis correction op
+        if (m_doChangeOfBasis)
+        {
+            SdfAttributeSpecHandle rotateSpec =
+                SdfAttributeSpec::New(primSpec, m_rotateAttrName, SdfValueTypeNames->Float, SdfVariabilityVarying);
+            rotateSpec->SetDefaultValue(VtValue(static_cast<float>(m_CoB.m_rotation.GetAngle())));
+            newOrder.push_back(m_rotateAttrName);
+        }
+
+        for (; existingIndex < m_xformOpOrder.size(); ++existingIndex)
+        {
+            newOrder.push_back(m_xformOpOrder[existingIndex]);
+        }
+        orderSpec->SetDefaultValue(VtValue(newOrder));
+    }
+
+private:
+    TfToken m_scaleAttrName;
+    TfToken m_rotateAttrName;
+    VtArray<TfToken> m_xformOpOrder;
+};
+
+// Simple cache used to determine if a prim is a skeleton root or inside a skeleton without having to traverse the
+// hierarchy each time. Prims that belong to a skeleton are keyed by path, with a value of true if the prim is the root
+// prim of the skeleton, and false if it is inside one. Prims that have nothing to do with a skeleton are absent
+typedef std::unordered_map<SdfPath, bool, SdfPath::Hash> SkeletonCache;
+
+/// Discovers every skeleton of the stage in a single traversal and builds a cache
+SkeletonCache findSkeletons(const UsdStagePtr& stage)
+{
+    SkeletonCache cache;
+
+    UsdPrimRange range = UsdPrimRange::Stage(stage, UsdPrimAllPrimsPredicate);
+    for (UsdPrimRange::iterator it = range.begin(); it != range.end(); ++it)
+    {
+        if (!it->IsA<UsdSkelRoot>())
+        {
+            continue;
+        }
+
+        cache[it->GetPath()] = true;
+
+        // everything below the skeleton root is inside this skeleton - including any nested skeleton root, which must
+        // not be recorded as a root of its own or its hierarchy would be corrected twice
+        for (const UsdPrim& descendant : it->GetAllDescendants())
+        {
+            cache[descendant.GetPath()] = false;
+        }
+
+        // the whole skeleton has been recorded so there is no need to descend into it
+        it.PruneChildren();
+    }
+
+    return cache;
+}
+
+
+/// Resolves a unique name for a correction xformOp added to the given prim, appending an incrementing numeric suffix
+/// to the preferred name for as long as the prim already has an attribute of that name.
+///
+/// Note: this must be done while discovering the work rather than while writing it, since by the time the correction
+///       is written we are inside an SdfChangeBlock and can only read from the active edit layer.
+TfToken resolveCorrectionOpName(const UsdPrim& prim, const TfToken& preferredName)
+{
+    TfToken name = preferredName;
+    size_t suffix = 1;
+    while (prim.HasAttribute(name))
+    {
+        name = TfToken(preferredName.GetString() + std::to_string(suffix));
+        ++suffix;
+    }
+
+    return name;
+}
+
+
 /// Functor for traversing the layer and determine which attributes need to be scaled.
 class LayerTraversalFunctor
 {
@@ -1696,6 +1836,7 @@ public:
                           const ChangeOfBasisPrecompute& changeOfBasis,
                           bool collapseXforms,
                           bool ignoreKitCameras,
+                          const SkeletonCache& skeletonCache,
                           AttributeTransformers& attributeTransformers,
                           std::vector<std::string>& warnings)
         : m_stage(stage)
@@ -1706,6 +1847,7 @@ public:
         , m_CoB(changeOfBasis)
         , m_collapseXforms(collapseXforms)
         , m_ignoreKitCameras(ignoreKitCameras)
+        , m_skeletonCache(skeletonCache)
         , m_attributeTransformers(attributeTransformers)
         , m_warnings(warnings)
     {
@@ -1749,6 +1891,14 @@ public:
         // authored typename
         SdfPrimSpecHandle primSpec = m_layer->GetPrimAtPath(m_primPath);
         m_createIfUnauthored = primSpec && primSpec->GetSpecifier() == SdfSpecifierDef && prim.HasAuthoredTypeName();
+
+        // handle stopping scale and change of basis processing at the root prim of a skeleton
+        if (handleSkeletonRoot(prim, primSpec))
+        {
+            // either this prim is the root of a skeleton (which has had its correction applied) or it is a descendant
+            // of a skeleton root - in either case no further processing is required
+            return;
+        }
 
         m_processedScale.clear();
         m_processedChangeOfBasis.clear();
@@ -2037,16 +2187,8 @@ public:
         // otherwise create an up axis correction transformer if this prim is concrete in the active layer
         else if (requiresRotation && primSpec->GetSpecifier() == SdfSpecifierDef)
         {
-            // resolve the name of the up axis correction attribute - this needs to be done at this point since at
-            // the time we write the attribute we're in an SdfChangeBlock so can only read from the active edit layer
-            TfToken axisCorrectionAttrName = _tokens->xformOpRotateUpAxisCorrection;
-            size_t suffix = 1;
-            while (prim.HasAttribute(axisCorrectionAttrName))
-            {
-                axisCorrectionAttrName =
-                    TfToken(_tokens->xformOpRotateUpAxisCorrection.GetString() + std::to_string(suffix));
-                ++suffix;
-            }
+            // resolve the name of the up axis correction attribute
+            const TfToken axisCorrectionAttrName = resolveCorrectionOpName(prim, _tokens->xformOpRotateUpAxisCorrection);
 
             // get the xformOpOrder since this will need updating after adding the up axis correction xform
             VtArray<TfToken> xformOpOrder;
@@ -2158,6 +2300,7 @@ private:
     ChangeOfBasisPrecompute m_CoB;
     bool m_collapseXforms;
     bool m_ignoreKitCameras;
+    const SkeletonCache& m_skeletonCache;
     AttributeTransformers& m_attributeTransformers;
     std::vector<std::string>& m_warnings;
     // the current prim path being processed
@@ -2168,6 +2311,72 @@ private:
     std::unordered_set<std::string> m_processedScale;
     // attribute names that have been processed as change of basis for the current prim
     std::unordered_set<std::string> m_processedChangeOfBasis;
+
+    /// Handles the case where processing should stop at the root prim of a skeleton (``SkelRoot``). Returns true if the
+    /// current prim is a skeleton root or a descendant of one, in which case the caller should perform no further
+    /// processing of the prim.
+    ///
+    /// When a skeleton root is found a single scale and/or rotation xformOp is applied to its xform (via a
+    /// SkeletonRootTransformer) as the outermost transforms, which corrects the metrics of the skeleton root itself and
+    /// of its entire hierarchy at once. The prims below the skeleton root are left untouched.
+    bool handleSkeletonRoot(const UsdPrim& prim, const SdfPrimSpecHandle& primSpec)
+    {
+        // if the prim is not in the skeleton cache it means either the option to stop at skeleton roots
+        // is disabled or the prim is not a skeleton root or descendant of one
+        const auto found = m_skeletonCache.find(prim.GetPath());
+        if (found == m_skeletonCache.end())
+        {
+            return false;
+        }
+
+        // if this prim isn't a skeleton root then it is inside one - which is corrected at its own root - so we don't
+        // need to do any further processing of this prim
+        if (!found->second)
+        {
+            return true;
+        }
+
+        // if we reach this point, the prim is a skeleton root and should be corrected
+        // --
+        // only apply the correction to prims that are a concrete def in the active edit layer
+        if (!primSpec || primSpec->GetSpecifier() != SdfSpecifierDef)
+        {
+            m_warnings.emplace_back(
+                "Unable to apply skeleton root metrics correction since the prim is not a concrete def in the active "
+                "edit layer, the skeleton hierarchy will be left uncorrected: " +
+                m_primPath.GetAsString());
+            return true;
+        }
+
+        // resolve unique names for the correction ops
+        const TfToken scaleAttrName = resolveCorrectionOpName(prim, _tokens->xformOpScaleSkeletonCorrection);
+        const TfToken rotateAttrName = resolveCorrectionOpName(prim, _tokens->xformOpRotateSkeletonCorrection);
+
+        // get the existing xformOpOrder so the correction ops can be prepended to it
+        VtArray<TfToken> xformOpOrder;
+        if (UsdGeomXformable xformable = UsdGeomXformable(prim))
+        {
+            UsdAttribute xformOpOrderAttr = xformable.GetXformOpOrderAttr();
+            if (xformOpOrderAttr.IsValid())
+            {
+                xformOpOrderAttr.Get(&xformOpOrder);
+            }
+        }
+
+        AttributeTransformerPtr transformer(
+            new SkeletonRootTransformer(m_primPath, scaleAttrName, rotateAttrName, xformOpOrder));
+        if (m_doScale)
+        {
+            transformer->setScale(m_scale);
+        }
+        if (m_doChangeOfBasis)
+        {
+            transformer->setChangeOfBasis(m_CoB);
+        }
+        m_attributeTransformers.push_back(std::move(transformer));
+
+        return true;
+    }
 
     /// Utility function which determines if a schema attribute needs scaling - and whether it should be created in the
     /// layer if it doesn't exist
@@ -2254,6 +2463,13 @@ EditStageMetricsOperation::EditStageMetricsOperation()
         kDisplayTypeBool,
         "Whether to ignore the special Kit viewport cameras (such as persp, front, top, right) when changing stage metrics.\n Note: in UI mode the viewport applies its own correction to the viewport cameras, but in batch mode this should be disabled to ensure the cameras are corrected.",
         m_ignoreKitCameras);
+
+    addArgument(
+        "stopAtSkeletonRoot",
+        "Stop At Skeleton Root",
+        kDisplayTypeBool,
+        "Whether to stop scale and change of basis processing at the root prim (``SkelRoot``) of a skeleton. When enabled, instead of processing every prim in the skeleton hierarchy individually, a single scale and/or rotation xformOp is applied to the skeleton root's xform and the prims below it are left unprocessed.",
+        m_stopAtSkeletonRoot);
 }
 
 
@@ -2285,7 +2501,12 @@ std::string EditStageMetricsOperation::getDocumentation() const
            "few cases with surprising behavior, for example if the edit stage layer contains an ``over`` on a "
            "single ``xformOp`` in a stack of ``xformOps`` on a prim in the underlying sublayer/reference, this "
            "will cause the entire ``xformOp`` stack to have its up axis transformed even though only a part of "
-           "the stack exists in the active edit layer.\n";
+           "the stack exists in the active edit layer.\n"
+           "    - When ``stopAtSkeletonRoot`` is enabled, the operation stops scaling and changing the basis at the "
+           "root prim (``SkelRoot``) of a skeleton. Rather than processing every prim in the skeleton hierarchy "
+           "individually, a single scale and/or rotation ``xformOp`` is prepended to the skeleton root's xform as the "
+           "outermost transform so that the metrics correction is applied to the entire skeleton at once, and the "
+           "prims below the skeleton root are left unprocessed.\n";
 }
 
 
@@ -2393,6 +2614,13 @@ OperationResult EditStageMetricsOperation::executeImpl()
         return { true };
     }
 
+    // discover the skeletons of the stage up front
+    SkeletonCache skeletonCache;
+    if (m_stopAtSkeletonRoot)
+    {
+        skeletonCache = findSkeletons(stage);
+    }
+
     // perform read stage traversal to scale the attributes
     AttributeTransformers attributeTransformers;
     std::vector<std::string> warnings;
@@ -2405,6 +2633,7 @@ OperationResult EditStageMetricsOperation::executeImpl()
                                           CoB,
                                           m_collapseXforms,
                                           m_ignoreKitCameras,
+                                          skeletonCache,
                                           attributeTransformers,
                                           warnings));
 

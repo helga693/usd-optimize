@@ -1,10 +1,10 @@
 ---
 name: testing
 description: Run all tests or individual tests for Usd Optimize (repo.sh on Linux, repo.bat on Windows). Use for unit, binding, and coverage runs.
-version: "1.0.0"
 allowed-tools: Shell
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [testing, qa, doctest]
 ---
 

@@ -27,7 +27,7 @@ class ZeroExtentChecker(BaseUsdOptimizeChecker):
     @classmethod
     def _optimize_stage(cls, usdStage: Usd.Stage, _: Usd.Prim, operation_configs: list) -> None:
         """
-        Run scene optimizer using the results of the remove small geometry analysis
+        Run Usd Optimize using the results of the remove small geometry analysis
         """
         analysis.optimize(usdStage, operation_configs)
 

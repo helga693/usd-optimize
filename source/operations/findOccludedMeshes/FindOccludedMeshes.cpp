@@ -221,32 +221,6 @@ OperationResult FindOccludedMeshesOperation::executeImpl()
 
     auto stage = GetStage(getUsdStage(), primsToProcess, m_checkTransparency);
 
-    // Zero-extent meshes (all points coincident) form zero-size clusters whose grid resolution
-    // degenerates to 0, aborting the MeshTools CPU voxelizer with std::length_error.
-    // They can neither occlude nor be meaningfully occlusion-tested, so drop them up front.
-    std::vector<std::shared_ptr<Mesh>> keptMeshes;
-    for (const auto& mesh : stage->meshes())
-    {
-        const Vec3 dims = mesh->getAABB().getDimensions();
-        if (std::max({ dims.x, dims.y, dims.z }) > 0.0f)
-        {
-            keptMeshes.push_back(mesh);
-        }
-        else
-        {
-            USD_OPTIMIZE_LOG_WARN("Skipping zero-extent (degenerate) mesh '%s'", mesh->path().c_str());
-        }
-    }
-    if (keptMeshes.size() != stage->meshes().size())
-    {
-        auto filteredStage = std::make_shared<Stage>();
-        if (!keptMeshes.empty())
-        {
-            filteredStage->init(keptMeshes);
-        }
-        stage = filteredStage;
-    }
-
     if (stage->meshes().empty())
     {
         USD_OPTIMIZE_LOG_INFO("No prims to process");
@@ -284,31 +258,18 @@ OperationResult FindOccludedMeshesOperation::executeImpl()
         }
     }
 
-    // Fail the operation instead of aborting the process if the checker throws on input the
-    // voxelizer cannot handle.
-    try
+    if (m_useGpu && isCudaAvailable())
     {
-        if (m_useGpu && isCudaAvailable())
-        {
-            VisCheckerGPU visChecker;
-            OK = visChecker.check(*stage, params);
-        }
-        else
-        {
-            VisCheckerCPU visChecker;
-            OK = visChecker.check(*stage, params);
-        }
+        VisCheckerGPU visChecker;
+        OK = visChecker.check(*stage, params);
     }
-    catch (const std::exception& e)
+    else
     {
-        USD_OPTIMIZE_LOG_ERROR("Visibility check failed: %s", e.what());
-        OK = false;
+        VisCheckerCPU visChecker;
+        OK = visChecker.check(*stage, params);
     }
-    catch (...)
-    {
-        USD_OPTIMIZE_LOG_ERROR("Visibility check failed with an unknown exception");
-        OK = false;
-    }
+    // mesh_tools_lib 1.0.2+ returns false (rather than throwing) on degenerate input; any
+    // unexpected exception is still caught by Operation::execute()'s framework handler.
 
     if (!OK)
     {

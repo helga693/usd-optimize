@@ -1,10 +1,10 @@
 ---
 name: new-validator
 description: Add a new performance-validator rule that wraps a Usd Optimize analysis-mode operation. Use when creating a new validator rule class from scratch.
-version: "2.0.0"
 allowed-tools: Shell, Read, Edit, Write
 metadata:
   author: NVIDIA Corporation
+  version: "2.0.0"
   tags: [validation, performance, authoring]
 ---
 

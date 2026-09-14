@@ -1,10 +1,10 @@
 ---
 name: deduplicate-hierarchies
 description: Collapse duplicate prim hierarchies into instanceable internal references. Use when deduplicating subtrees or folding repeated prims into prototypes.
-version: "1.0.0"
 allowed-tools: Bash, Read
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [usd, deduplication, hierarchy, instancing]
 ---
 
@@ -21,7 +21,8 @@ metadata:
 >
 > **Platform paths.** Examples use the POSIX CLI path
 > `_build/linux-x86_64/release/bin/usdOptimize`. On Windows use
-> `_build\windows-x86_64\release\bin\usdOptimize.exe`; `$Var` → `%VAR%`.
+> `_build\windows-x86_64\release\bin\usdOptimize.bat` (the `.bat`, not the
+> `.exe`, which cannot resolve its DLLs); `$Var` → `%VAR%`.
 
 > **Safety note.** Duplicates are identified by subtree shape, prim
 > types, and authored property names, then refined by verifying all

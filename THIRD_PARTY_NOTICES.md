@@ -9,9 +9,12 @@ This product includes software developed by third parties and/or by NVIDIA. The 
 copyright notices, attribution statements, and license texts for those components are
 provided below.
 
-The list of components below is generated from the build-time and run-time dependencies
+The list of components below reflects the build-time and run-time dependencies
 declared in `deps/target-deps.packman.xml` (which transitively imports
-`deps/usd-deps.generated.packman.xml`).
+`deps/usd-deps.generated.packman.xml` and, for USD-version-specific libraries,
+`deps/usd-lib-deps.generated.packman.xml` sourced from `deps/usd-lib-deps.json`).
+Version strings match the packman package pins for the default USD 25.11 build unless
+noted otherwise.
 
 ---
 
@@ -19,7 +22,8 @@ declared in `deps/target-deps.packman.xml` (which transitively imports
 
 ## Pixar Animation Studios - OpenUSD - Tomorrow Open Source Technology License 1.0
 
-Component: `usd-${config}` (version 25.11)
+Component: `usd-${config}` (version 25.11; packman package
+`0.25.11-gl.18041+v25.11.363a7c8d`)
 
 Attribution Statements: The proprietary code links against OpenUSD shared libraries and
 uses its C++ and Python APIs pervasively. The core library reads, writes, traverses, and
@@ -99,7 +103,7 @@ limitations under the License.
 
 ## Wenzel Jakob - pybind11 - BSD 3-Clause License
 
-Component: `pybind11` (version 2.11.1)
+Component: `pybind11` (version 2.11.1-0)
 
 Attribution Statements: The proprietary code includes pybind11 headers and uses its
 macros/types to define Python binding modules that expose the C++ usd optimize API to
@@ -240,7 +244,8 @@ from NVIDIA CORPORATION is strictly prohibited.
 
 ## NVIDIA CORPORATION - omnimesh_ops_usd - NVIDIA Proprietary
 
-Component: `omnimesh_ops_usd` (version 110.0.3)
+Component: `omnimesh_ops_usd` (packman package pinned per USD version in
+`deps/usd-lib-deps.json`)
 
 Attribution Statements: NVIDIA-developed mesh-operations library used by Usd Optimize
 operations. Refer to the package's bundled `LICENSE` and `THIRD_PARTY_NOTICES` files for
@@ -260,9 +265,10 @@ from NVIDIA CORPORATION is strictly prohibited.
 
 ---
 
-## NVIDIA CORPORATION - mesh_tools - NVIDIA Proprietary
+## NVIDIA CORPORATION - mesh_tools_lib - NVIDIA Proprietary
 
-Component: `mesh_tools` (version 110.0.15)
+Component: `mesh_tools_lib`. Linked as `mesh_tools` in the build tree
+(`deps/target-deps.packman.xml`).
 
 Attribution Statements: NVIDIA-developed mesh-processing toolkit. Refer to the package's
 bundled `LICENSE` and `THIRD_PARTY_NOTICES` files for any embedded third-party components.
@@ -283,7 +289,7 @@ from NVIDIA CORPORATION is strictly prohibited.
 
 ## NVIDIA CORPORATION - autouv-core - NVIDIA Proprietary
 
-Component: `autouv-core` (version 1.0.2)
+Component: `autouv-core` (USD-version-specific packman pin in `deps/usd-lib-deps.json`)
 
 Attribution Statements: NVIDIA-developed automatic UV unwrapping library. Bundles Eigen
 (see the Eigen entry above for its OSS notice). Refer to the package's bundled `LICENSE`
@@ -328,7 +334,7 @@ third-party software whose copyright and license notices are reproduced in the
 
 ## NVIDIA CORPORATION - shrinkwrap_openvdb - NVIDIA Proprietary
 
-Component: `shrinkwrap_openvdb` (version 13.0.1)
+Component: `shrinkwrap_openvdb` (USD-version-specific packman pin in `deps/usd-lib-deps.json`)
 
 Attribution Statements: NVIDIA-developed shrink-wrap library that incorporates the
 OpenVDB volumetric library (Apache 2.0). The underlying OpenVDB notices are reproduced
@@ -351,10 +357,15 @@ from NVIDIA CORPORATION is strictly prohibited.
 # Notes
 
 * This file enumerates the packages declared in `deps/target-deps.packman.xml` (and the
-  USD/Python imports it pulls from `deps/usd-deps.generated.packman.xml`). Build-host-only and
-  developer tooling dependencies (`deps/host-deps.packman.xml`, `deps/repo-deps.packman.xml`,
-  and the optional `deps/repo-deps-nv.packman.xml` side-car) are not included here because
-  they are not redistributed with the product.
+  USD/Python imports it pulls from `deps/usd-deps.generated.packman.xml`, plus
+  USD-version-specific libraries from `deps/usd-lib-deps.generated.packman.xml`).
+  Build-host-only and developer tooling dependencies (`deps/host-deps.packman.xml`,
+  `deps/repo-deps.packman.xml`, and the optional `deps/repo-deps-nv.packman.xml`
+  side-car) are not included here because they are not redistributed with the product.
+* **`omnimesh_ops_usd`, `autouv-core`, and `shrinkwrap_openvdb`** are pinned per OpenUSD
+  version in `deps/usd-lib-deps.json` (currently 25.11 and 25.05). The entries above
+  describe the default 25.11 build; consult that file for the exact packman strings when
+  building against 25.05.
 * **Python (CPython, PSF License)** is pulled in via `deps/usd-deps.generated.packman.xml` as a
   host-environment dependency used only for building the pybind11 bindings. The CPython
   interpreter is not redistributed as part of Usd Optimize Core (consumers supply

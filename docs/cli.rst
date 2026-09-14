@@ -5,14 +5,19 @@ Usd Optimize provides a command line interface (CLI) tool under
 ``bin/usdOptimize`` that allows you to run optimization operations on USD files
 without writing any code.
 
+.. Note:: **On Windows, run** ``bin\usdOptimize.bat``, not ``usdOptimize.exe``.
+   The ``.bat`` sets up the library path; the bare ``.exe`` exits
+   ``-1073741515`` (``STATUS_DLL_NOT_FOUND``). Name it explicitly, since
+   ``PATHEXT`` resolves ``.exe`` first.
+
 CLI usage is as follows:
 
 .. Note:: The native CLI runs the built-in (C++) operations only, which is why
    the operation list below is a subset of the full :doc:`operations` catalog.
    The Python-plugin operations (``pythonScript``, ``deleteHiddenPrims``,
-   ``removeUntypedPrims``) are unavailable here because the CLI binary does not
-   initialize a Python interpreter; use the ``usd-optimize`` Python wheel /
-   bindings to run them.
+   ``removeUntypedPrims``, ``moveMaterials``) are unavailable here because the
+   CLI binary does not initialize a Python interpreter; use the ``usd-optimize``
+   Python wheel / bindings to run them.
 
 .. GENERATED_DOCS_BEGIN - do not edit manually - see tools/repoman/docs_gen.py
 

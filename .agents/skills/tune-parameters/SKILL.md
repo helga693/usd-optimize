@@ -1,10 +1,10 @@
 ---
 name: tune-parameters
 description: "[EXPERIMENTAL] Interactive parameter tuning for a Usd Optimize operation. Use to iterate on op parameters, or to extend an operation's getDocumentation() with tuning guidance."
-version: "1.0.0"
 allowed-tools: Read, Glob, Edit, Write, Bash
 metadata:
   author: NVIDIA Corporation
+  version: "1.0.0"
   tags: [tuning, parameters, interactive]
 ---
 

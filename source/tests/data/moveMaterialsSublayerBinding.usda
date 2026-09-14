@@ -1,0 +1,16 @@
+#usda 1.0
+(
+)
+
+# Binding opinion only. The mesh and the material it points at are defined in the stronger root
+# layer, so relocating the material leaves this target dangling unless it is retargeted explicitly.
+over "World"
+{
+    over "Group_A"
+    {
+        over "CubeA"
+        {
+            rel material:binding = </World/Group_A/Looks/Mat>
+        }
+    }
+}

@@ -23,7 +23,7 @@ Output is a single JSON object on stdout:
   - "stale"   — CSV exists but the asset has been edited since the run
 
 Usage:
-    python tools/perf_validators/resolve_artifacts.py <asset_path> [--logs-dir <dir>]
+    python tools/validators/resolve_artifacts.py <asset_path> [--logs-dir <dir>]
 """
 
 import argparse
@@ -63,7 +63,7 @@ def main(argv: list[str]) -> int:
     if args.logs_dir:
         artifact_dir = Path(args.logs_dir).resolve()
     else:
-        h = hashlib.sha1(asset_abs.encode("utf-8")).hexdigest()
+        h = hashlib.sha1(asset_abs.encode("utf-8"), usedforsecurity=False).hexdigest()
         artifact_dir = _temp_root() / "usd-optimize-validation" / h
 
     # Pure resolve: do not create the directory here. Callers that intend to

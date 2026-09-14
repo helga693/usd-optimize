@@ -252,8 +252,9 @@ void parseArgs(int argc, char** argv, Args& args)
         {
             args.output = getArg(argc, argv, i);
         }
-        // Special case - assume final arg can also be input
-        else if (i == argc - 1)
+        // Special case - assume final arg can also be input, unless it is flag-shaped:
+        // a mistyped flag would otherwise be misreported as a failed layer open.
+        else if (i == argc - 1 && arg.rfind('-', 0) != 0)
         {
             args.input = arg;
         }

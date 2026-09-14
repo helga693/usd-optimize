@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+from typing import ClassVar, Mapping
+
 from pxr import Usd
 from usd_validation_nvidia import capabilities, register_requirements
 
-from .base_usd_optimize_checker import BaseUsdOptimizeChecker
+from .base_usd_optimize_checker import BaseUsdOptimizeChecker, Parameter, ParameterFromOpArg
 
 
 @register_requirements(capabilities.GeometryRequirements.VG_008)
@@ -15,6 +17,11 @@ class CoincidingGeometryChecker(BaseUsdOptimizeChecker):
     """
 
     OPERATION_NAME: str = "findCoincidingGeometry"
+    PARAMETERS: ClassVar[Mapping[str, Parameter]] = {
+        "TOLERANCE": ParameterFromOpArg("tolerance"),
+        "OFFSET": ParameterFromOpArg("offset"),
+        "FUZZY": ParameterFromOpArg("fuzzy"),
+    }
 
     def _CheckStage(self, usdStage: Usd.Stage, analysis_data: dict):
 

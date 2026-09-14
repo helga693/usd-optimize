@@ -1,10 +1,10 @@
 ---
 name: run-operations
 description: Run Usd Optimize operations on a USD asset with the usdOptimize CLI, using inline ops or a preset/JSON config. Use when applying optimizations or fixing issues interpret-validators flagged.
-version: "2.0.0"
 allowed-tools: Bash
 metadata:
   author: NVIDIA Corporation
+  version: "2.0.0"
   tags: [usd, optimization, operations, cli]
 ---
 
@@ -44,8 +44,12 @@ an op targets).
 
 ```
 _build/<platform>/<config>/bin/usdOptimize        # POSIX
-_build\<platform>\<config>\bin\usdOptimize.exe     # Windows
+_build\<platform>\<config>\bin\usdOptimize.bat     # Windows
 ```
+
+Use the `.bat` on Windows, not `usdOptimize.exe`: it sets up the library path
+the executable needs. The bare `.exe` exits `-1073741515`
+(`STATUS_DLL_NOT_FOUND`), and `PATHEXT` picks it first, so name the `.bat`.
 
 `<platform>` is `linux-x86_64`, `linux-aarch64`, or `windows-x86_64`;
 `<config>` is `release` (default) or `debug`. List `_build/` to pick the right
@@ -133,7 +137,7 @@ OUT=<output path>
 ```
 
 ```powershell
-$Bin = "_build\windows-x86_64\release\bin\usdOptimize.exe"
+$Bin = "_build\windows-x86_64\release\bin\usdOptimize.bat"
 $Out = "<output path>"
 & $Bin -i "<asset>" -c config_presets\memory-reduction.json -s -r -w $Out *> "$Out.log"
 ```
@@ -155,8 +159,11 @@ To confirm the result, validate the optimized stage:
 ```
 
 If the CLI exits non-zero, surface the failing line from the log; don't
-auto-retry. A common cause is an argument key mismatch — operations ignore
-unknown keys silently, so verify keys against `docs/operations/<key>.rst`.
+auto-retry. A common cause is an argument key mismatch, and the two entry points
+differ: `-a key=value` **rejects** an unknown key (`Error: invalid argument
+specified: <key>`, exit 1), while a `-c` config file **warns and continues**,
+running the operation with the default. Verify keys against
+`docs/operations/<key>.rst`.
 
 ---
 
@@ -200,7 +207,7 @@ a decision:
 | `Failed to open stage` | Bad/unsupported input path | Verify the path and that it's a real USD stage (`inspect-asset`). |
 | CLI exits non-zero mid-chain | An operation failed | Surface the failing op line from the log; check args against `docs/operations/<key>.rst`. |
 | Output written but stage looks unchanged | Op ran on an empty selection (wrong `paths`/prim type) | Use `inspect-asset` to confirm the stage has the targeted prims. |
-| Argument has no effect | Unknown key (ignored silently) | Verify the key in `docs/operations/<key>.rst`. |
+| Argument has no effect | Unknown key in a `-c` config — the op warns (`Unknown argument '<key>' ... ignoring it`) and runs with the default | Grep the log for `Unknown argument`; verify the key in `docs/operations/<key>.rst`. |
 
 ## Purpose
 

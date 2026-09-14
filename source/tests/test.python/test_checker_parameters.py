@@ -16,15 +16,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from pxr import Usd
+from pxr import Sdf, Usd
 from usd_optimize.validators import (
+    CoincidingGeometryChecker,
+    ColocatedVerticesChecker,
     EmptyLeafChecker,
+    FlatHierarchiesChecker,
+    HighVertexCountChecker,
     NonManifoldChecker,
     NormalsChecker,
     OccludedMeshesChecker,
     PrimitiveFitChecker,
+    RedundantTimeSamplesChecker,
+    RtxMeshCountChecker,
     SmallMeshChecker,
     set_verbose,
 )
@@ -186,7 +192,7 @@ class TestRealCheckerIntegration(TestCase):
     def test_small_mesh_checker_declares_size_threshold(self):
         defs = {d.display_name: d for d in SmallMeshChecker.get_parameter_definitions()}
         self.assertIn("SIZE_THRESHOLD", defs)
-        self.assertIn("SmallMeshChecker.SIZE_THRESHOLD", defs)
+        self.assertIn("UsdOptimizeSmallMeshChecker.SIZE_THRESHOLD", defs)
         self.assertAlmostEqual(defs["SIZE_THRESHOLD"].assigned_value, 0.001)
         self.assertEqual(defs["SIZE_THRESHOLD"].type, ParameterType.FLOAT)
 
@@ -227,9 +233,78 @@ class TestRealCheckerIntegration(TestCase):
         ):
             with self.subTest(parameter=name):
                 self.assertIn(name, defs)
-                self.assertIn(f"OccludedMeshesChecker.{name}", defs)
+                self.assertIn(f"UsdOptimizeOccludedMeshesChecker.{name}", defs)
                 self.assertAlmostEqual(defs[name].assigned_value, expected_default)
                 self.assertEqual(defs[name].type, expected_type)
+
+    def test_coinciding_geometry_parameters_flow_to_op_arg(self):
+        rule = CoincidingGeometryChecker(parameters=_make_mapping({"TOLERANCE": 0.05, "OFFSET": 0.5, "FUZZY": True}))
+        args = rule._effective_args()
+        self.assertEqual(args["tolerance"], 0.05)
+        self.assertEqual(args["offset"], 0.5)
+        self.assertEqual(args["fuzzy"], True)
+
+    def test_colocated_vertices_parameters_flow_to_op_arg(self):
+        rule = ColocatedVerticesChecker(parameters=_make_mapping({"TOLERANCE": 0.05}))
+        self.assertEqual(rule._effective_args()["tolerance"], 0.05)
+
+    def test_flat_hierarchies_parameters_flow_to_op_arg(self):
+        rule = FlatHierarchiesChecker(parameters=_make_mapping({"MAX_CHILDREN": 5, "CONSIDER_ALL_CHILDREN": False}))
+        args = rule._GetArgs()
+        self.assertEqual(args["maxChildren"], 5)
+        self.assertEqual(args["considerAllChildren"], False)
+
+    def test_high_vertex_count_parameters_flow_to_op_arg(self):
+        rule = HighVertexCountChecker(
+            parameters=_make_mapping({"LEVEL_HIGH": 40000, "LEVEL_VERY_HIGH": 60000, "LEVEL_EXTREME": 150000})
+        )
+        args = rule._effective_args()
+        self.assertEqual(args["high"], 40000)
+        self.assertEqual(args["veryHigh"], 60000)
+        self.assertEqual(args["extreme"], 150000)
+
+    def test_primitive_fit_parameters_flow_to_op_arg(self):
+        rule = PrimitiveFitChecker(
+            parameters=_make_mapping(
+                {
+                    "VERTEX_TOLERANCE": 0.5,
+                    "VOLUME_TOLERANCE": 0.25,
+                    "IGNORE_SUBSETS": False,
+                }
+            )
+        )
+        args = rule._effective_args()
+        self.assertEqual(args["vertexTolerance"], 0.5)
+        self.assertEqual(args["volumeTolerance"], 0.25)
+        self.assertEqual(args["ignoreSubsets"], False)
+
+    def test_redundant_timesamples_parameters_flow_to_op_arg(self):
+        rule = RedundantTimeSamplesChecker(parameters=_make_mapping({"EPSILON_DOUBLE": 1e-6, "EPSILON_FLOAT": 1e-3}))
+        args = rule._effective_args()
+        self.assertEqual(args["epsilonD"], 1e-6)
+        self.assertEqual(args["epsilonF"], 1e-3)
+
+    def test_rtx_mesh_count_limit_is_advertised_parameter(self):
+        # RTX_UNIQUE_MESH_COUNT_LIMIT is a checker-side threshold (not an op arg)
+        # but must still be advertised as a tunable parameter.
+        defs = {d.display_name: d for d in RtxMeshCountChecker.get_parameter_definitions()}
+        self.assertIn("RTX_UNIQUE_MESH_COUNT_LIMIT", defs)
+        self.assertIn("UsdOptimizeRtxMeshCountChecker.RTX_UNIQUE_MESH_COUNT_LIMIT", defs)
+        self.assertEqual(defs["RTX_UNIQUE_MESH_COUNT_LIMIT"].assigned_value, 438000)
+        self.assertEqual(defs["RTX_UNIQUE_MESH_COUNT_LIMIT"].type, ParameterType.INT)
+
+    def test_rtx_mesh_count_limit_override_resolves(self):
+        rule = RtxMeshCountChecker(parameters=_make_mapping({"RTX_UNIQUE_MESH_COUNT_LIMIT": 6}))
+        self.assertEqual(rule._effective_args()["rtxUniqueMeshCountLimit"], 6)
+
+    def test_rtx_mesh_count_limit_default_resolves(self):
+        rule = RtxMeshCountChecker()
+        self.assertEqual(rule._effective_args()["rtxUniqueMeshCountLimit"], 438000)
+
+    def test_rtx_mesh_count_limit_not_forwarded_to_operation(self):
+        # The threshold must not leak into the op args passed to rtxMeshCount.
+        rule = RtxMeshCountChecker(parameters=_make_mapping({"RTX_UNIQUE_MESH_COUNT_LIMIT": 6}))
+        self.assertEqual(rule._GetArgs(), {})
 
     def test_occluded_meshes_checker_overrides_flow_to_op_args(self):
         rule = OccludedMeshesChecker(
@@ -237,7 +312,7 @@ class TestRealCheckerIntegration(TestCase):
                 {
                     "USE_GPU": True,
                     "MINIMUM_GAP_SIZE": 0.5,
-                    "OccludedMeshesChecker.MAXIMUM_GRID_RESOLUTION": 1000.0,
+                    "UsdOptimizeOccludedMeshesChecker.MAXIMUM_GRID_RESOLUTION": 1000.0,
                 }
             )
         )
@@ -247,6 +322,55 @@ class TestRealCheckerIntegration(TestCase):
         self.assertEqual(args["clustered"], True)  # untouched default
         self.assertEqual(args["minimumGapSize"], 0.5)
         self.assertEqual(args["maximumGridResolution"], 1000.0)
+
+
+class TestFixerParameterHookup(TestCase):
+    """Validate that each checker's fix (Suggestion callable) runs its backing
+    operation with the tuned parameter overrides, not hardcoded defaults."""
+
+    @staticmethod
+    def _first_op_args(mock_optimize):
+        """Return the args of the first OperationConfig the fixer built.
+
+        ``analysis.optimize(usdStage, operations)`` is called positionally, so
+        ``operations`` is the second positional arg.
+        """
+        operations = mock_optimize.call_args[0][1]
+        return operations[0].args
+
+    def test_colocated_vertices_fixer_uses_tolerance(self):
+        rule = ColocatedVerticesChecker(parameters=_make_mapping({"TOLERANCE": 0.05}))
+        stage = Usd.Stage.CreateInMemory()
+        with patch("usd_optimize.validators.colocated_vertices_checker.analysis.optimize") as mock_optimize:
+            rule._mesh_merge_vertices(stage, stage.GetPrimAtPath("/"))
+        args = self._first_op_args(mock_optimize)
+        self.assertEqual(args["tolerance"], 0.05)
+        self.assertEqual(args["mergeVertices"], True)  # fix intent preserved
+
+    def test_redundant_timesamples_fixer_uses_epsilon(self):
+        rule = RedundantTimeSamplesChecker(parameters=_make_mapping({"EPSILON_DOUBLE": 1e-6, "EPSILON_FLOAT": 1e-3}))
+        stage = Usd.Stage.CreateInMemory()
+        attr = stage.DefinePrim("/Foo").CreateAttribute("bar", Sdf.ValueTypeNames.Double)
+        with patch("usd_optimize.validators.redundant_timesamples_checker.analysis.optimize") as mock_optimize:
+            rule._remove_redundant_timesamples(stage, attr)
+        args = self._first_op_args(mock_optimize)
+        self.assertEqual(args["epsilonD"], 1e-6)
+        self.assertEqual(args["epsilonF"], 1e-3)
+        self.assertEqual(args["attributePaths"], ["/Foo.bar"])  # target still set
+
+    def test_fit_primitives_fixer_uses_tolerances(self):
+        rule = PrimitiveFitChecker(
+            parameters=_make_mapping({"VERTEX_TOLERANCE": 0.5, "VOLUME_TOLERANCE": 0.25, "IGNORE_SUBSETS": False})
+        )
+        stage = Usd.Stage.CreateInMemory()
+        with patch("usd_optimize.validators.primitive_fit_checker.analysis.optimize") as mock_optimize:
+            rule._fit_primitives("sphere", False, stage, stage.GetPrimAtPath("/"))
+        args = self._first_op_args(mock_optimize)
+        self.assertEqual(args["vertexTolerance"], 0.5)
+        self.assertEqual(args["volumeTolerance"], 0.25)
+        self.assertEqual(args["ignoreSubsets"], False)
+        self.assertEqual(args["fitSphere"], True)  # per-suggestion fit target
+        self.assertEqual(args["ignoreNonConstPrimvars"], False)  # callsite-driven
 
 
 def _per_prim_messages(mock_add_warning, summary_substrings):
@@ -287,7 +411,7 @@ class TestVerboseReporting(TestCase):
     def test_verbose_param_advertised_as_bool(self):
         defs = {d.display_name: d for d in NonManifoldChecker.get_parameter_definitions()}
         self.assertIn("VERBOSE", defs)
-        self.assertIn("NonManifoldChecker.VERBOSE", defs)
+        self.assertIn("UsdOptimizeNonManifoldChecker.VERBOSE", defs)
         self.assertEqual(defs["VERBOSE"].type, ParameterType.BOOL)
 
     def test_disabled_by_default_emits_only_summary(self):
@@ -320,7 +444,7 @@ class TestVerboseReporting(TestCase):
         self.assertEqual(per_prim, ["NonManifold mesh found"])
 
     def test_qualified_engine_parameter_enables_per_prim(self):
-        rule = NonManifoldChecker(parameters=_make_mapping({"NonManifoldChecker.VERBOSE": True}))
+        rule = NonManifoldChecker(parameters=_make_mapping({"UsdOptimizeNonManifoldChecker.VERBOSE": True}))
         add_warning = self._run_check(
             rule,
             {"meshesThatAreNonManifolds": 1, "meshesThatAreNonManifoldsPaths": ["/A"]},
@@ -330,7 +454,9 @@ class TestVerboseReporting(TestCase):
     def test_qualified_parameter_overrides_unqualified(self):
         # Global VERBOSE=False but per-rule override True: qualified form wins,
         # matching _effective_args precedence.
-        rule = NonManifoldChecker(parameters=_make_mapping({"VERBOSE": False, "NonManifoldChecker.VERBOSE": True}))
+        rule = NonManifoldChecker(
+            parameters=_make_mapping({"VERBOSE": False, "UsdOptimizeNonManifoldChecker.VERBOSE": True})
+        )
         add_warning = self._run_check(
             rule,
             {"meshesThatAreNonManifolds": 1, "meshesThatAreNonManifoldsPaths": ["/A"]},
@@ -339,7 +465,9 @@ class TestVerboseReporting(TestCase):
 
     def test_qualified_parameter_can_disable_when_global_enabled(self):
         # The reverse: global VERBOSE=True, per-rule override False -> off.
-        rule = NonManifoldChecker(parameters=_make_mapping({"VERBOSE": True, "NonManifoldChecker.VERBOSE": False}))
+        rule = NonManifoldChecker(
+            parameters=_make_mapping({"VERBOSE": True, "UsdOptimizeNonManifoldChecker.VERBOSE": False})
+        )
         add_warning = self._run_check(
             rule,
             {"meshesThatAreNonManifolds": 1, "meshesThatAreNonManifoldsPaths": ["/A"]},

@@ -1,9 +1,13 @@
-r"""Summarize a usd-validation-nvidia issues CSV into compact JSON.
+r"""Summarize a usd-validation-nvidia issues report into compact JSON.
 
 Pure-stdlib helper used by the interpret-validators skill so the agent doesn't
-have to load and parse a multi-thousand-row CSV directly into context. Runs
+have to load and parse a multi-thousand-row report directly into context. Runs
 under any Python 3 on any OS (POSIX: ``python3 ...``; Windows: ``py -3 ...``
 or the bundled ``_build\target-deps\python\python.exe``).
+
+Accepts either driver output and produces the same summary from both:
+``--csv-output`` (a CSV) or ``--json-output`` (a JSON whose per-issue rows live
+under ``rules[].issues[]``). The input is chosen by file extension.
 
 The script has two output shapes, selected by the flags:
 
@@ -67,11 +71,11 @@ the full count). ``--severity <name>`` further filters to one severity level.
 recorded as the literal string ``"(stage)"``.
 
 Usage:
-    python3 tools/perf_validators/summarize_csv.py <csv_path>
-    python3 tools/perf_validators/summarize_csv.py <csv> --max-failures-per-rule 10
-    python3 tools/perf_validators/summarize_csv.py <csv> --rule <Name>
-    python3 tools/perf_validators/summarize_csv.py <csv> --rule <Name> --locations --limit 20
-    python3 tools/perf_validators/summarize_csv.py <csv> --rule <Name> --locations --severity failure
+    python3 tools/validators/summarize_csv.py <report>          # issues.csv or results.json
+    python3 tools/validators/summarize_csv.py <report> --max-failures-per-rule 10
+    python3 tools/validators/summarize_csv.py <report> --rule <Name>
+    python3 tools/validators/summarize_csv.py <report> --rule <Name> --locations --limit 20
+    python3 tools/validators/summarize_csv.py <report> --rule <Name> --locations --severity failure
 
 Windows note: replace ``python3`` with ``py -3`` (Python launcher) or the
 bundled interpreter at ``_build\target-deps\python\python.exe``.
@@ -84,6 +88,28 @@ import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+
+
+def _raise_csv_field_limit():
+    """Raise csv's field-size cap as high as the platform allows.
+
+    Validator issues can carry very large fields -- e.g. a mesh checker that
+    lists tens of thousands of affected prim paths in a single cell -- which
+    exceeds Python's default 128 KB limit and makes csv.reader raise
+    "field larger than field limit". sys.maxsize can overflow the C long the
+    csv module uses (notably 32-bit long on Windows), so back off until a
+    value is accepted.
+    """
+    limit = sys.maxsize
+    while limit > 1:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 2
+
+
+_raise_csv_field_limit()
 
 
 _LOC_RE = re.compile(r"<([^>]*)>")
@@ -133,6 +159,86 @@ def _read_rows(csv_path: Path):
             loc = _normalize_location(row["Location"])
             family = "Usd Optimize" if rule.startswith("UsdOptimize") else "base"
             yield rule, sev, msg, sug, loc, family
+
+
+_JSON_SEVERITY_ALIASES = {"failed_check": "failure", "failedcheck": "failure"}
+
+
+def _json_location(at) -> str:
+    """Bare path from an issue's ``at`` field (dict, list, or absent).
+
+    ``at`` is list-valued for some rules, so unwrap before reading the path.
+    """
+    if isinstance(at, list):
+        at = at[0] if at else None
+    raw = (at.get("path") or at.get("identifier") or "") if isinstance(at, dict) else (at or "")
+    return _normalize_location(raw)
+
+
+def _require_dict(value, what: str) -> dict:
+    """Return *value* as a dict, or raise ValueError naming what was expected.
+
+    Every shape mismatch has to surface as ValueError so ``main`` can report it
+    as structured JSON; letting ``.get`` raise AttributeError would print a
+    traceback instead.
+    """
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"not a usd-validation-nvidia report: expected {what} to be an object, "
+            f"got {type(value).__name__}. Re-run run-validators to regenerate the report."
+        )
+    return value
+
+
+def _sub_dict(container: dict, key: str) -> dict:
+    """``container[key]`` when it is an object, else ``{}``.
+
+    Optional nested fields (``rule``, ``suggestion``) are absent on some issues
+    and vary by engine version, so a missing or oddly-typed one reads as empty
+    rather than failing the whole report.
+    """
+    value = container.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _read_rows_json(json_path: Path):
+    """Yield the same tuples as :func:`_read_rows` from a ``--json-output`` file.
+
+    Shape is ``{"status", "rules": [{"rule": {"name"}, "issues": [...]}]}`` --
+    per-issue detail lives under ``rules[].issues[]``, so the JSON carries the
+    same rows as the CSV under a different schema.
+
+    Version note: this is the shape emitted by usd-validation-nvidia >= 1.21.0,
+    the floor this repo pins. A report produced by an older engine may use a
+    different schema; it is rejected below rather than parsed on a guess.
+    """
+    with json_path.open(encoding="utf-8", errors="replace") as f:
+        doc = _require_dict(json.load(f), "the top level")
+    rules = doc.get("rules")
+    if not isinstance(rules, list):
+        raise ValueError(
+            "not a usd-validation-nvidia report: expected a top-level 'rules' list "
+            f"(as emitted by --json-output on engine >= 1.21.0), got keys {sorted(doc)}. "
+            "Re-run run-validators to regenerate the report."
+        )
+    for entry in rules:
+        entry = _require_dict(entry, "each 'rules' entry")
+        fallback = _sub_dict(entry, "rule").get("name", "")
+        issues = entry.get("issues") or []
+        if not isinstance(issues, list):
+            raise ValueError(
+                "not a usd-validation-nvidia report: expected 'issues' to be a list, "
+                f"got {type(issues).__name__}"
+            )
+        for issue in issues:
+            issue = _require_dict(issue, "each issue")
+            rule = _sub_dict(issue, "rule").get("name") or fallback
+            sev = str(issue.get("severity", "")).lower()
+            sev = _JSON_SEVERITY_ALIASES.get(sev, sev)
+            sug = _sub_dict(issue, "suggestion").get("message", "") or ""
+            loc = _json_location(issue.get("at"))
+            family = "Usd Optimize" if rule.startswith("UsdOptimize") else "base"
+            yield rule, sev, issue.get("message", ""), sug, loc, family
 
 
 def _summary_mode(rows, args) -> dict:
@@ -243,11 +349,11 @@ def _locations_mode(rows, args) -> dict:
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
-        description="Summarize a usd-validation-nvidia issues CSV.",
+        description="Summarize a usd-validation-nvidia issues report (CSV or JSON).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("csv_path")
+    p.add_argument("report_path", help="--csv-output CSV or --json-output JSON.")
     p.add_argument(
         "--max-failures-per-rule",
         type=int,
@@ -278,14 +384,15 @@ def main(argv: list[str]) -> int:
     )
     args = p.parse_args(argv)
 
-    csv_file = Path(args.csv_path)
-    if not csv_file.is_file():
-        print(json.dumps({"error": f"csv not found: {args.csv_path}"}))
+    report = Path(args.report_path)
+    if not report.is_file():
+        print(json.dumps({"error": f"report not found: {args.report_path}"}))
         return 1
 
+    read = _read_rows_json if report.suffix.lower() == ".json" else _read_rows
     try:
-        rows = list(_read_rows(csv_file))
-    except ValueError as e:
+        rows = list(read(report))
+    except (ValueError, json.JSONDecodeError) as e:
         print(json.dumps({"error": str(e)}))
         return 1
 
